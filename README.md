@@ -1,154 +1,155 @@
 # 🚀 LinkedIn Profile Optimizer
 
-**AI-powered multi-agent pipeline that analyzes your LinkedIn profile, scores every section, and generates optimized content to boost your visibility and engagement.**
-
-Built with Python, Hugging Face models, and a human-in-the-loop approval workflow — so nothing changes on your profile without your explicit approval.
+**AI-powered tool that analyzes your LinkedIn profile, scores every section, and gives you copy-paste-ready improvements — all running locally on your machine.**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-200%2B_passing-brightgreen.svg)](#testing)
+[![AI](https://img.shields.io/badge/AI-Llama_3.3_70B-purple.svg)](#ai-chat)
 
 ---
 
-## 🎯 What It Does
+## What It Does
 
 ```
-Your LinkedIn Profile → AI Analysis → Score (0-100) → Optimized Content → You Approve → Published
+Your Profile Data  →  AI Analysis  →  Score (0-100)  →  Recommendations  →  Chat for Help
 ```
 
-1. **Extracts** your LinkedIn profile data (headline, about, experience, skills, posts)
-2. **Pulls** your GitHub activity (repos, languages, contributions)
-3. **Scores** every section on a 0-100 scale with specific improvement factors
-4. **Generates** optimized content (headlines, about sections, post ideas, banner suggestions)
-5. **Shows** you everything side-by-side before any changes happen
-6. **Tracks** engagement improvements after you apply changes
+| Input | How |
+|-------|-----|
+| **LinkedIn Profile** | Paste URL + browser cookie (li_at) |
+| **Resume PDF** | Upload / drag-drop |
+| **GitHub** | Paste URL or username |
+
+| Output | What You Get |
+|--------|-------------|
+| **Score** | 0-100 across 6 sections (headline, about, experience, skills, education, engagement) |
+| **Recommendations** | Specific actionable fixes for each weak section |
+| **AI Chat** | Ask LinkBot anything — it knows your full profile and gives copy-paste text |
+| **Post Ideas** | Generated content ideas based on your background |
 
 ---
 
-## ⚡ Quick Start (5 minutes)
-
-### Prerequisites
-
-- Python 3.11 or newer
-- A Hugging Face account (free) → [Sign up](https://huggingface.co/join)
-
-### 1. Clone & Install
+## ⚡ Quick Start
 
 ```bash
+# 1. Clone
 git clone https://github.com/nikhilshivpuriya29/linkedin-profile-optimizer.git
 cd linkedin-profile-optimizer
+
+# 2. Install
 python -m venv .venv
-source .venv/bin/activate    # On Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e ".[dev]"
+pip install fastapi uvicorn python-multipart httpx PyPDF2 python-dotenv openai anthropic google-genai
+
+# 3. Set your HuggingFace token (free)
+echo "HF_TOKEN=your_hf_token_here" > .env
+
+# 4. Run
+python api.py
 ```
 
-### 2. Set Up Your Token
-
-Get a free HuggingFace token from https://huggingface.co/settings/tokens
-
-```bash
-# Create .env file
-echo "HF_TOKEN=hf_your_token_here" > .env
-```
-
-### 3. Run It
-
-```bash
-# Using your resume (no LinkedIn OAuth needed)
-python run_with_resume.py
-
-# Or using the CLI
-python -m linkedin_optimizer run
-```
-
-That's it! You'll see your profile scores and optimization suggestions in the terminal.
+Open **http://localhost:8000** — that's it.
 
 ---
 
-## 📖 How to Use
+## 🖥️ Web UI
 
-### Command Line Interface
+The app runs entirely in your browser at `localhost:8000`:
 
-```bash
-# Run analysis now
-python -m linkedin_optimizer run
+**Left panel:**
+- 3 input cards: LinkedIn URL (+cookie), Resume PDF (drag-drop), GitHub URL
+- Click "Analyze My Profile"
+- See scores, recommendations, post ideas, profile data
 
-# Schedule automatic weekly analysis
-python -m linkedin_optimizer schedule weekly
+**Right panel:**
+- AI Chat (LinkBot) — always visible
+- Quick action buttons: Headline, About, Posts, Skills, Experience, Keywords
+- Powered by Llama 3.3 70B (free, via HuggingFace)
 
-# Pause/resume scheduled runs
-python -m linkedin_optimizer pause
-python -m linkedin_optimizer resume
-
-# Check current status
-python -m linkedin_optimizer status
-
-# Review and approve suggestions
-python -m linkedin_optimizer review
-
-# View past runs
-python -m linkedin_optimizer history
-
-# View/update config
-python -m linkedin_optimizer config
-python -m linkedin_optimizer config --set schedule_interval=daily
-```
-
-### Resume Mode (No OAuth Required)
-
-If you don't want to set up LinkedIn OAuth, just place your resume PDF in the project folder and run:
-
-```bash
-python run_with_resume.py
-```
-
-This parses your resume, pulls your GitHub data, runs the full analysis, and generates content suggestions — all without needing LinkedIn API access.
+**Features:**
+- Dark / Light mode toggle
+- Responsive layout
+- No external accounts needed (HuggingFace free tier is enough)
 
 ---
 
-## 📊 What Gets Scored
+## 🤖 AI Chat (LinkBot)
 
-| Section | Scoring Factors |
-|---------|----------------|
-| **Headline** | Keywords, character usage (out of 220), value proposition |
-| **About** | Narrative structure, keyword density (1-3%), call-to-action, length |
-| **Experience** | Metrics in bullets, action verbs, role alignment, formatting |
-| **Skills** | Role alignment, endorsements, top 3 pinned skills |
-| **Posts** | Engagement rate, posting frequency, topic consistency |
-| **Banner/Photo** | Custom banner, photo resolution, brand alignment |
+LinkBot is your personal LinkedIn optimization coach. After analysis, it has full context of:
+- Your LinkedIn profile data
+- Your resume content
+- Your GitHub repos and languages
+- Your section scores
 
-Each section gets a score from 0-100. Sections below 70 get automatic content generation.
+**Ask it things like:**
+- "Rewrite my headline"
+- "Write me a better About section"
+- "Give me 5 post ideas for this week"
+- "What keywords should I target?"
+- "How can I improve my experience bullets?"
+
+**AI Models supported:**
+| Model | Provider | Cost |
+|-------|----------|------|
+| Llama 3.3 70B (default) | HuggingFace Router | Free |
+| GPT-4o-mini | OpenAI | Paid |
+| Claude Sonnet | Anthropic | Paid |
+| Gemini 2.0 Flash | Google | Free tier |
+
+---
+
+## 🔗 LinkedIn Data Extraction
+
+To pull live data from LinkedIn, you need the `li_at` cookie from your browser:
+
+1. Go to linkedin.com (while logged in)
+2. Press F12 → Application tab → Cookies → linkedin.com
+3. Find `li_at` → copy the value
+4. Paste it in the app's LinkedIn section
+
+This gives authenticated access to your full profile — no developer app needed.
+
+---
+
+## 📄 Resume Mode
+
+Don't want to set up LinkedIn cookies? Just upload your resume PDF:
+- Extracts all sections automatically
+- Works with any PDF format
+- Gives the same quality analysis
+
+---
+
+## 🐙 GitHub Integration
+
+Add your GitHub URL to enrich the analysis:
+- Pulls your repos, languages, and activity
+- Suggests technical content ideas based on your code
+- Adds open-source contributions to your profile suggestions
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Pipeline Orchestrator                     │
-│                   (Sequential Execution)                      │
-├─────────────┬──────────────┬────────────────┬───────────────┤
-│   Stage 1   │   Stage 2    │    Stage 3     │    Stage 4    │
-│  Extraction │   Analysis   │   Generation   │   Approval    │
-├─────────────┼──────────────┼────────────────┼───────────────┤
-│ LinkedIn    │ Analyzer     │ Content        │ Approval      │
-│ MCP Client  │ Agent        │ Creator Agent  │ Workflow      │
-│ GitHub API  │ (HF Model)   │ (HF Model)     │ CLI Interface │
-└─────────────┴──────────────┴────────────────┴───────────────┘
-         │                                            │
-         ▼                                            ▼
-   ┌──────────┐                              ┌──────────────┐
-   │ DataStore│                              │ Engagement   │
-   │ (JSON)   │                              │ Tracker      │
-   └──────────┘                              └──────────────┘
+┌────────────────────────────────────────────────────────┐
+│                   Web UI (React + Tailwind)              │
+│                 http://localhost:8000                    │
+├────────────────────────────────────────────────────────┤
+│                   FastAPI Backend (api.py)               │
+├──────────┬──────────┬──────────┬───────────────────────┤
+│ LinkedIn │  Resume  │  GitHub  │  AI Chat (LinkBot)    │
+│ Voyager  │  PyPDF2  │  REST    │  Llama 3.3 70B       │
+│ API      │  Parser  │  API     │  via HF Router       │
+├──────────┴──────────┴──────────┴───────────────────────┤
+│              Profile Scoring Engine                      │
+│          (Heuristic + AI-powered analysis)              │
+├────────────────────────────────────────────────────────┤
+│              Core Pipeline (src/linkedin_optimizer/)     │
+│  Agents | Scrapers | Persistence | Approval | Tracking  │
+└────────────────────────────────────────────────────────┘
 ```
-
-**Key design decisions:**
-- **Modular pipeline** — each stage is independent and testable
-- **JSON file storage** — no database needed, fully portable
-- **Heuristic + AI scoring** — works offline with heuristics, uses HF models when available
-- **Human-in-the-loop** — nothing gets published without your explicit approval
-- **Graceful degradation** — GitHub/HF unavailable? Pipeline continues with what's available
 
 ---
 
@@ -156,66 +157,23 @@ Each section gets a score from 0-100. Sections below 70 get automatic content ge
 
 ```
 linkedin-profile-optimizer/
-├── src/linkedin_optimizer/
-│   ├── __init__.py              # Package entry
-│   ├── __main__.py              # python -m support
-│   ├── cli.py                   # CLI with 8 subcommands
-│   ├── config.py                # Configuration loading
-│   ├── models.py                # All data models (22 dataclasses)
-│   ├── orchestrator.py          # Pipeline coordination
-│   ├── scheduler.py             # APScheduler cron scheduling
-│   ├── agents/
-│   │   ├── analyzer_agent.py    # Profile scoring & insights
-│   │   └── content_creator_agent.py  # Content generation
-│   ├── scrapers/
-│   │   ├── linkedin_mcp_client.py    # LinkedIn MCP adapter
-│   │   ├── profile_scraper.py        # Extraction with retries
-│   │   └── github_extractor.py       # GitHub REST API
-│   ├── integrations/
-│   │   └── hf_client.py         # HuggingFace with retry/fallback
-│   ├── persistence/
-│   │   └── data_store.py        # JSON file storage
-│   ├── approval/
-│   │   ├── workflow.py          # Approve/reject/modify logic
-│   │   └── cli_interface.py     # Rich terminal UI
-│   └── tracking/
-│       └── engagement_tracker.py # Post-change metric tracking
-├── tests/
-│   ├── unit/                    # Unit tests (fast, isolated)
-│   ├── property/                # Hypothesis property-based tests
-│   └── integration/             # Full pipeline integration tests
-├── data/
-│   └── config.json              # Your configuration
-├── run_with_resume.py           # Quick-start resume mode
-├── pyproject.toml               # Dependencies & build config
-├── .env                         # Your secrets (not committed)
-└── .gitignore                   # Keeps secrets safe
-```
-
----
-
-## ⚙️ Configuration
-
-Edit `data/config.json`:
-
-```json
-{
-  "linkedin_profile_url": "https://www.linkedin.com/in/your-username",
-  "github_username": "your-github-username",
-  "schedule_interval": "weekly",
-  "models": {
-    "analyzer_model_id": "mistralai/Mistral-7B-Instruct-v0.3",
-    "content_model_id": "mistralai/Mistral-7B-Instruct-v0.3",
-    "fallback_model_id": "google/gemma-2-9b-it"
-  },
-  "huggingface": {
-    "api_token": "${HF_TOKEN}",
-    "timeout_seconds": 30,
-    "max_retries": 3
-  },
-  "data_dir": "./data",
-  "approval_expiry_days": 7
-}
+├── api.py                      # FastAPI backend (main entry)
+├── web/static/index.html       # Web UI (React + Tailwind)
+├── run_with_resume.py          # CLI quick-start mode
+├── src/linkedin_optimizer/     # Core Python pipeline
+│   ├── cli.py                  # CLI interface (8 commands)
+│   ├── orchestrator.py         # Pipeline coordination
+│   ├── scheduler.py            # APScheduler cron jobs
+│   ├── agents/                 # AI agents (analyzer, content creator)
+│   ├── scrapers/               # Data extraction (LinkedIn, GitHub)
+│   ├── integrations/           # HuggingFace client
+│   ├── persistence/            # JSON file storage
+│   ├── approval/               # Review workflow + CLI
+│   └── tracking/               # Engagement metrics
+├── tests/                      # 200+ tests (unit, property, integration)
+├── docs/                       # Setup guide, architecture docs
+├── data/config.json            # Configuration
+└── .env                        # Secrets (not committed)
 ```
 
 ---
@@ -223,76 +181,67 @@ Edit `data/config.json`:
 ## 🧪 Testing
 
 ```bash
-# Run all tests
-pytest
-
-# Run only fast unit tests
-pytest tests/unit/
-
-# Run property-based tests (Hypothesis)
-pytest tests/property/ -m property
-
-# Run integration tests
-pytest tests/integration/ -m integration
-
-# Run with coverage
-pytest --cov=linkedin_optimizer
+pytest                              # All 200+ tests
+pytest tests/unit/ -v               # Unit tests
+pytest tests/property/ -m property  # Property-based (Hypothesis)
+pytest tests/integration/           # Integration tests
 ```
-
-**Test coverage: 200+ tests** including:
-- 24 property-based correctness tests (Hypothesis)
-- Unit tests for every component
-- Full pipeline integration tests
 
 ---
 
-## 🔧 Tech Stack
+## ⚙️ Configuration
 
-| Component | Technology | Why |
-|-----------|-----------|-----|
-| Language | Python 3.11+ | Async support, rich ecosystem |
-| AI Models | Hugging Face Inference API | Free tier, state-of-the-art models |
-| HTTP | httpx (async) | Modern, async-first HTTP client |
-| Testing | pytest + Hypothesis | Property-based testing for correctness |
-| CLI | argparse + Rich | Beautiful terminal output |
-| Scheduling | APScheduler | Cron-based, async-compatible |
-| Storage | JSON files | No database needed, portable |
-| LinkedIn | MCP Protocol (stdio) | Browser-authenticated scraping |
-| GitHub | REST API v3 | Public profile data |
+Edit `data/config.json` or use the CLI:
+
+```bash
+python -m linkedin_optimizer config
+python -m linkedin_optimizer config --set schedule_interval=daily
+```
+
+---
+
+## 📊 CLI Commands
+
+```bash
+python -m linkedin_optimizer run        # Run analysis
+python -m linkedin_optimizer status     # Check status
+python -m linkedin_optimizer review     # Approve suggestions
+python -m linkedin_optimizer history    # View past runs
+python -m linkedin_optimizer schedule weekly  # Auto-schedule
+python -m linkedin_optimizer pause      # Pause scheduler
+python -m linkedin_optimizer resume     # Resume scheduler
+```
 
 ---
 
 ## 🚧 Limitations
 
-- **LinkedIn OAuth required for live data** — Resume mode works without it, but real-time profile extraction needs LinkedIn Developer app setup
-- **Corporate networks** — Firewalls may block HuggingFace API; heuristic scoring works offline
-- **Free HF tier rate limits** — Heavy usage may hit rate limits; exponential backoff handles this
-- **No auto-publishing** — By design, all changes require manual approval
-- **English only** — Content generation optimized for English profiles
+- LinkedIn live scraping needs `li_at` cookie (expires periodically)
+- Corporate networks may block HuggingFace API (use mobile hotspot)
+- Free HF tier has rate limits (generous for personal use)
+- English-optimized content generation
+- No auto-publishing (all changes need your approval)
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Roadmap (v2)
 
-- [ ] Web UI dashboard (React/Next.js)
-- [ ] Multi-language support
+- [ ] Separate Resume view (LaTeX-style rendering, before/after)
+- [ ] Separate LinkedIn view (profile card before/after)
+- [ ] Minimizable chat panel
+- [ ] Better responsive mobile design
+- [ ] Multi-platform support (Twitter/X, portfolio sites)
 - [ ] A/B testing for headlines
-- [ ] Competitor profile comparison
-- [ ] LinkedIn post scheduler integration
-- [ ] Chrome extension for in-page suggestions
+- [ ] Chrome extension
 
 ---
 
 ## 📄 License
 
-MIT License — use it however you want.
+MIT — do whatever you want with it.
 
 ---
 
-## 🙋 Contributing
-
-Pull requests welcome! Please run `pytest` before submitting.
-
----
-
-*Built with [Kiro](https://kiro.dev) — AI-powered development environment.*
+<p align="center">
+  Built with ❤️ by <a href="https://www.linkedin.com/in/nikhilshivpuriya/"><b>Nikhil Shivpuriya</b></a>
+</p>

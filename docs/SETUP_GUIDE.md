@@ -1,165 +1,129 @@
-# 📋 Complete Setup Guide
+# 📋 Setup Guide
 
-## For Non-Technical Users
-
-You don't need to be a programmer to use this tool. Follow these steps exactly.
+## For Everyone (No Technical Skills Needed)
 
 ---
 
 ## Step 1: Install Python
 
-**Mac:**
+**Mac:** Open Terminal and run:
 ```bash
 brew install python
 ```
 
-**Windows:**
-Download from https://www.python.org/downloads/ → Run installer → ✅ Check "Add Python to PATH"
+**Windows:** Download from https://python.org → Install → ✅ Check "Add to PATH"
 
-**Verify it works:**
+**Verify:**
 ```bash
 python --version
-# Should show: Python 3.11.x or higher
+# Should show 3.11 or higher
 ```
 
 ---
 
-## Step 2: Download This Project
+## Step 2: Download the Project
 
-**Option A — Using Git:**
 ```bash
 git clone https://github.com/nikhilshivpuriya29/linkedin-profile-optimizer.git
 cd linkedin-profile-optimizer
 ```
 
-**Option B — Download ZIP:**
-1. Go to the GitHub repo page
-2. Click green "Code" button → "Download ZIP"
-3. Unzip the folder
-4. Open Terminal/Command Prompt and `cd` into the folder
+Or download ZIP from GitHub → Unzip → Open Terminal in that folder.
 
 ---
 
-## Step 3: Set Up Python Environment
+## Step 3: Install Dependencies
 
 ```bash
-# Create a virtual environment (keeps things clean)
 python -m venv .venv
-
-# Activate it
-# Mac/Linux:
-source .venv/bin/activate
-# Windows:
-.venv\Scripts\activate
-
-# Install dependencies
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+pip install fastapi uvicorn python-multipart httpx PyPDF2 python-dotenv openai anthropic google-genai
 ```
-
-You should see packages installing. Wait until it finishes.
 
 ---
 
-## Step 4: Get Your HuggingFace Token (Free)
+## Step 4: Get Your Free AI Token
 
-1. Go to https://huggingface.co/join → Create free account
+1. Go to https://huggingface.co/join (free account)
 2. Go to https://huggingface.co/settings/tokens
-3. Click "New token" → Name it "linkedin-optimizer" → Select "Read" → Create
-4. Copy the token (starts with `hf_`)
-
----
-
-## Step 5: Configure
-
-Create a file called `.env` in the project folder:
+3. Create a token → Copy it
 
 ```bash
-# Mac/Linux:
-echo "HF_TOKEN=paste_your_token_here" > .env
-
-# Windows (PowerShell):
-"HF_TOKEN=paste_your_token_here" | Out-File .env
-```
-
-Edit `data/config.json` and replace with your info:
-```json
-{
-  "linkedin_profile_url": "https://www.linkedin.com/in/YOUR-USERNAME",
-  "github_username": "YOUR-GITHUB-USERNAME"
-}
+echo "HF_TOKEN=hf_your_token_here" > .env
 ```
 
 ---
 
-## Step 6: Run!
+## Step 5: Run
 
 ```bash
-python run_with_resume.py
+python api.py
 ```
 
-Or if you have LinkedIn OAuth set up:
-```bash
-python -m linkedin_optimizer run
-```
+Open **http://localhost:8000** in your browser. Done!
 
 ---
 
-## What You'll See
+## How to Use
 
-```
-LinkedIn Profile Optimizer — Resume Mode
+### Option A: Upload Resume (Easiest)
+1. Drag your resume PDF into the "Resume" box
+2. Click "🔍 Analyze My Profile"
+3. See your scores and chat with LinkBot
 
-Stage 1: Loading profile from resume PDF...
-  ✓ Profile loaded
+### Option B: Connect LinkedIn (Best Results)
+1. Go to linkedin.com in your browser (logged in)
+2. Press F12 → Application → Cookies → find `li_at` → copy value
+3. Paste LinkedIn URL + cookie in the app
+4. Click Analyze
 
-Stage 2: Extracting GitHub data...
-  ✓ GitHub: 19 repos, 0 notable
-
-Stage 3: Analyzing profile sections...
-  ✓ Overall score: 55/100
-
-┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
-┃ Section      ┃ Score ┃ Status     ┃
-┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
-│ headline     │  47   │ Low        │
-│ about        │  46   │ Low        │
-│ experience   │  62   │ Needs Work │
-└──────────────┴───────┴────────────┘
-
-Stage 4: Generating optimized content...
-  ✓ Suggested Headline: ...
-  ✓ Suggested About: ...
-  ✓ Post Ideas: ...
-
-✓ Pipeline complete!
-```
+### Option C: Add GitHub (Technical Profiles)
+1. Enter your GitHub URL or username
+2. The app pulls your repos, languages, and activity
+3. LinkBot uses this for technical content suggestions
 
 ---
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| "command not found: python" | Install Python (Step 1) |
-| "No module named linkedin_optimizer" | Run `pip install -e ".[dev]"` |
-| SSL certificate errors | Your network blocks HTTPS — try from home or use a VPN |
-| HuggingFace API timeout | Free tier can be slow — wait 30s, it auto-retries |
-| "Configuration file not found" | Make sure you're in the project folder |
+| Problem | Fix |
+|---------|-----|
+| Page won't load | Make sure `python api.py` is running |
+| Chat not responding | Check you're on WiFi (not corporate VPN) |
+| "No HF token" error | Create `.env` file with your token |
+| LinkedIn cookie expired | Get a fresh `li_at` from browser |
+| GitHub not loading | Check username is correct and public |
 
 ---
 
-## Using on Different IDEs
+## Using from Any IDE
 
-This tool works from **any terminal** regardless of your IDE:
+| IDE | Open Terminal |
+|-----|-------------|
+| VS Code | Ctrl+` |
+| PyCharm | Alt+F12 |
+| IntelliJ | Alt+F12 |
+| Terminal app | Just open it |
 
-| IDE | How to Open Terminal |
-|-----|---------------------|
-| **VS Code** | `Ctrl+`` ` (backtick) or View → Terminal |
-| **Kiro** | Terminal panel at bottom |
-| **IntelliJ/WebStorm** | Alt+F12 or View → Tool Windows → Terminal |
-| **PyCharm** | Alt+F12 |
-| **Sublime Text** | Install "Terminus" package |
-| **Vim/Neovim** | `:terminal` |
-| **No IDE** | Just use Terminal (Mac) or Command Prompt (Windows) |
+Commands are the same everywhere:
+```bash
+cd path/to/linkedin-profile-optimizer
+python api.py
+```
 
-The commands are the same everywhere. Just navigate to the project folder and run.
+---
+
+## Updating
+
+```bash
+git pull
+pip install -e ".[dev]"
+python api.py
+```
+
+---
+
+<p align="center">
+  Created by <a href="https://www.linkedin.com/in/nikhilshivpuriya/">Nikhil Shivpuriya</a>
+</p>
