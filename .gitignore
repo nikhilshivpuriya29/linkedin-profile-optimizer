@@ -1,0 +1,36 @@
+# Environment variables (secrets)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+
+# Data (local pipeline output — keep config.json)
+data/profiles/
+data/reports/
+data/content/
+data/approvals/
+data/engagement/
+data/runs/
+
+# Testing
+.hypothesis/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal files
+*.pdf

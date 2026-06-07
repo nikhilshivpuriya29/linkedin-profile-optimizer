@@ -1,0 +1,21 @@
+{
+  "linkedin_profile_url": "https://www.linkedin.com/in/nikhilshivpuriya",
+  "github_username": "nikhilshivpuriya29",
+  "schedule_interval": "weekly",
+  "models": {
+    "analyzer_model_id": "mistralai/Mistral-7B-Instruct-v0.3",
+    "content_model_id": "mistralai/Mistral-7B-Instruct-v0.3",
+    "fallback_model_id": "google/gemma-2-9b-it"
+  },
+  "huggingface": {
+    "api_token": "${HF_TOKEN}",
+    "timeout_seconds": 30,
+    "max_retries": 3
+  },
+  "notifications": {
+    "enabled": true,
+    "method": "terminal_bell"
+  },
+  "data_dir": "./data",
+  "approval_expiry_days": 7
+}
