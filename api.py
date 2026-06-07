@@ -416,6 +416,8 @@ Rules:
             reply = await _call_openai(api_key, system_prompt, msg)
         elif provider == "anthropic" and api_key:
             reply = await _call_anthropic(api_key, system_prompt, msg)
+        elif provider == "gemini" and api_key:
+            reply = await _call_gemini(api_key, system_prompt, msg)
         elif provider == "huggingface" and api_key:
             reply = await _call_huggingface(api_key, system_prompt, msg)
         else:
@@ -474,6 +476,18 @@ async def _call_huggingface(api_key: str, system_prompt: str, message: str) -> s
             if isinstance(data, list) and data:
                 return data[0].get("generated_text", "").replace(full_prompt, "").strip()
         return f"HuggingFace API error: {r.status_code}"
+
+
+async def _call_gemini(api_key: str, system_prompt: str, message: str) -> str:
+    """Call Google Gemini for chat responses."""
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=f"{system_prompt}\n\nUser: {message}",
+    )
+    return response.text
 
 
 def _builtin_response(msg: str, profile, report, content) -> str:

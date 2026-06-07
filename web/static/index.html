@@ -261,6 +261,7 @@ function App() {
                             {[
                                 {id: 'builtin', label: '🤖 Built-in', desc: 'No API key needed'},
                                 {id: 'openai', label: '🟢 OpenAI', desc: 'GPT-4o-mini'},
+                                {id: 'gemini', label: '🔵 Gemini', desc: 'Gemini 2.0 Flash'},
                                 {id: 'anthropic', label: '🟣 Claude', desc: 'Claude Sonnet'},
                                 {id: 'huggingface', label: '🟡 HuggingFace', desc: 'Mistral-7B'},
                             ].map(p => (
@@ -278,7 +279,7 @@ function App() {
                         <div className="mb-4">
                             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">API Key</label>
                             <input type="password" value={aiApiKey} onChange={e => setAiApiKey(e.target.value)}
-                                placeholder={aiProvider === 'openai' ? 'sk-...' : aiProvider === 'anthropic' ? 'sk-ant-...' : 'hf_...'}
+                                placeholder={aiProvider === 'openai' ? 'sk-...' : aiProvider === 'anthropic' ? 'sk-ant-...' : aiProvider === 'gemini' ? 'AI...' : 'hf_...'}
                                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm" />
                         </div>
                     )}
@@ -450,7 +451,7 @@ function App() {
                             <span className="text-sm font-semibold">AI Assistant</span>
                         </div>
                         <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">
-                            {aiProvider === 'builtin' ? '🤖 Built-in' : aiProvider === 'openai' ? '🟢 GPT-4' : aiProvider === 'anthropic' ? '🟣 Claude' : '🟡 HF'}
+                            {aiProvider === 'builtin' ? '🤖 Built-in' : aiProvider === 'openai' ? '🟢 GPT-4' : aiProvider === 'gemini' ? '🔵 Gemini' : aiProvider === 'anthropic' ? '🟣 Claude' : '🟡 HF'}
                         </span>
                     </div>
 
