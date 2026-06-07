@@ -1,693 +1,536 @@
 """
-LinkedIn Profile Optimizer — API Backend
-==========================================
-FastAPI server that powers the Next.js frontend.
-
-Run with: python api.py
-Serves at: http://localhost:8000
+LinkedIn Profile Optimizer — FastAPI Backend
+Uses HuggingFace Router with Llama 3.3 70B for AI chat
 """
 
-import asyncio
-import sys
 import os
-from datetime import datetime
-from pathlib import Path
-from typing import Optional
+from dotenv import load_dotenv
+load_dotenv()
 
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
-
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
-from linkedin_optimizer.models import ProfileData, GitHubData
-from linkedin_optimizer.agents.analyzer_agent import AnalyzerAgent
-from linkedin_optimizer.agents.content_creator_agent import ContentCreatorAgent
-from linkedin_optimizer.scrapers.github_extractor import GitHubExtractor
-from linkedin_optimizer.persistence.data_store import DataStore
-
-app = FastAPI(title="LinkedIn Profile Optimizer API", version="1.0.0")
-
-# Allow frontend to connect
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Serve the frontend
+import json
+import re
+import httpx
+import PyPDF2
+import io
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import Optional, List
 
-@app.get("/")
-async def serve_frontend():
-    return FileResponse("web/static/index.html")
+app = FastAPI(title="LinkedIn Profile Optimizer")
 
+# ─── In-memory profile store ───────────────────────────────────────────────
+profile_store = {
+    "linkedin": None,
+    "resume": None,
+    "github": None,
+    "analysis": None,
+}
 
-# ─── Response Models ─────────────────────────────────────────────────────────
+# ─── AI Configuration ──────────────────────────────────────────────────────
+AI_ENDPOINT = "https://router.huggingface.co/together/v1/chat/completions"
+AI_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
-class SectionScoreResponse(BaseModel):
-    section_name: str
-    overall_score: int
-    missing: bool = False
-    factors: list[dict] = []
+SYSTEM_PROMPT = """You are "LinkBot" — a world-class LinkedIn Profile Optimization Coach with 10+ years of experience helping professionals maximize their LinkedIn presence.
 
-class RecommendationResponse(BaseModel):
-    element: str
-    modification: str
-    priority: str
-    guideline_reference: str
+Your personality:
+- Direct and actionable (no fluff)
+- You give specific copy-paste-ready text suggestions
+- You reference LinkedIn's algorithm and best practices
+- You're encouraging but honest about what needs improvement
 
-class AnalysisResponse(BaseModel):
-    overall_score: int
-    sections: list[SectionScoreResponse]
-    recommendations: list[RecommendationResponse]
-    headline_current: str
-    headline_suggested: Optional[str] = None
-    about_current: str
-    about_suggested: Optional[str] = None
-    experience_current: list[dict] = []
-    experience_suggested: list[dict] = []
-    skills: list[str] = []
-    certifications: list[str] = []
-    post_ideas: list[dict] = []
-    banner_suggestion: Optional[dict] = None
-    github_summary: Optional[str] = None
-
-class ChatRequest(BaseModel):
-    message: str
-    context: Optional[dict] = None
-
-class ChatResponse(BaseModel):
-    reply: str
-
-
-# ─── State ───────────────────────────────────────────────────────────────────
-
-last_profile: Optional[ProfileData] = None
-last_report = None
-last_content = None
-
-
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
-def parse_resume_pdf(file_path: str) -> ProfileData:
-    """Parse resume PDF into ProfileData."""
-    import fitz
-
-    doc = fitz.open(file_path)
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text()
-    doc.close()
-
-    lines = [l.strip() for l in full_text.split("\n") if l.strip()]
-    name = lines[0] if lines else "Professional"
-
-    experience = []
-    skills_list = []
-    education = []
-    certifications = []
-    about_lines = []
-    current_section = None
-    current_job = None
-
-    for line in lines[1:]:
-        lower = line.lower()
-        if any(kw in lower for kw in ["professional summary", "summary", "about"]):
-            current_section = "about"
-            continue
-        elif any(kw in lower for kw in ["professional experience", "work experience", "experience"]):
-            current_section = "experience"
-            continue
-        elif any(kw in lower for kw in ["technical skills", "skills"]):
-            current_section = "skills"
-            continue
-        elif "education" in lower:
-            current_section = "education"
-            continue
-        elif "certification" in lower:
-            current_section = "certifications"
-            continue
-
-        if current_section == "about":
-            about_lines.append(line)
-        elif current_section == "experience":
-            if line.startswith(("•", "-", "*", "–")):
-                bullet = line.lstrip("•-*– ").strip()
-                if bullet and current_job:
-                    current_job["description"] = current_job.get("description", "") + "\n• " + bullet
-            elif len(line) > 10 and not line.startswith(("•", "-")):
-                if current_job:
-                    experience.append(current_job)
-                current_job = {"title": line, "company": "", "description": ""}
-            elif current_job and not current_job.get("company"):
-                current_job["company"] = line
-        elif current_section == "skills":
-            for chunk in line.replace("•", "").replace("-", "").replace("–", "").split(","):
-                skill = chunk.strip()
-                if skill and 2 < len(skill) < 60:
-                    skills_list.append({"name": skill, "endorsements": 0})
-        elif current_section == "certifications":
-            cert = line.lstrip("•-*– ").strip()
-            if cert and len(cert) > 3:
-                certifications.append({"name": cert})
-
-    if current_job:
-        experience.append(current_job)
-
-    headline = name
-    if experience:
-        title = experience[0].get("title", "")
-        company = experience[0].get("company", "")
-        if title:
-            headline = f"{title}" + (f" at {company}" if company else "")
-
-    return ProfileData(
-        headline=headline,
-        about=" ".join(about_lines),
-        experience=experience[:10],
-        skills=skills_list[:20],
-        endorsements=[],
-        posts=[],
-        banner_url=None,
-        photo_url=None,
-        education=education,
-        certifications=certifications,
-        follower_count=0,
-        connection_count=0,
-        profile_views=None,
-    )
-
-
-async def fetch_github(url: str) -> Optional[GitHubData]:
-    """Fetch GitHub data."""
-    if not url.strip():
-        return None
-
-    username = url.strip().rstrip("/")
-    if "github.com/" in username:
-        username = username.split("github.com/")[-1].split("/")[0]
-
-    try:
-        import httpx
-
-        async def patched_extract(self):
-            async with httpx.AsyncClient(
-                base_url="https://api.github.com",
-                timeout=httpx.Timeout(15, connect=15),
-                headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "linkedin-optimizer"},
-                verify=False,
-            ) as client:
-                self._client = client
-                return await asyncio.wait_for(self._extract_all(), timeout=30.0)
-
-        original = GitHubExtractor.extract
-        GitHubExtractor.extract = patched_extract
-        extractor = GitHubExtractor(username=username, timeout=15)
-        result = await extractor.extract()
-        GitHubExtractor.extract = original
-
-        if result.success and result.data:
-            return result.data
-    except Exception:
-        pass
-    return None
-
-
-# ─── API Endpoints ───────────────────────────────────────────────────────────
-
-@app.post("/api/analyze", response_model=AnalysisResponse)
-async def analyze(
-    resume: Optional[UploadFile] = File(None),
-    github_url: str = Form(""),
-    linkedin_url: str = Form(""),
-):
-    """Run full profile analysis from resume PDF and/or GitHub."""
-    global last_profile, last_report, last_content
-
-    profile = None
-
-    # Parse resume
-    if resume:
-        tmp_path = f"/tmp/resume_{datetime.now().strftime('%H%M%S')}.pdf"
-        content = await resume.read()
-        with open(tmp_path, "wb") as f:
-            f.write(content)
-        profile = parse_resume_pdf(tmp_path)
-        os.unlink(tmp_path)
-
-    # Try LinkedIn URL extraction if no resume
-    if not profile and linkedin_url.strip():
-        try:
-            from linkedin_optimizer.scrapers.linkedin_mcp_client import LinkedInMCPClient
-            from linkedin_optimizer.scrapers.profile_scraper import ProfileScraper
-
-            mcp_client = LinkedInMCPClient({})
-            scraper = ProfileScraper(mcp_client, max_retries=2)
-            result = await scraper.extract(linkedin_url.strip())
-            if result.success and result.profile_data:
-                profile = result.profile_data
-        except Exception:
-            # MCP server not available — use LinkedIn URL as context hint
-            pass
-
-    if not profile:
-        # If we only have LinkedIn URL but couldn't scrape, create minimal profile
-        if linkedin_url.strip():
-            # Extract username from URL for display
-            username = linkedin_url.strip().rstrip("/").split("/")[-1]
-            profile = ProfileData(
-                headline=f"LinkedIn user: {username}",
-                about="Profile data could not be extracted. Please upload your resume PDF for full analysis, or set up LinkedIn OAuth (see docs).",
-            )
-        else:
-            profile = ProfileData(headline="No profile data provided. Please upload a resume PDF or provide your LinkedIn URL.")
-
-    last_profile = profile
-
-    # GitHub
-    github_data = await fetch_github(github_url)
-
-    # Analyze
-    analyzer = AnalyzerAgent(
-        model_id="mistralai/Mistral-7B-Instruct-v0.3",
-        fallback_model_id="google/gemma-2-9b-it",
-        hf_client=None,
-    )
-    report = await analyzer.analyze(profile, github_data)
-    last_report = report
-
-    # Generate content
-    content_creator = ContentCreatorAgent(
-        model_id="mistralai/Mistral-7B-Instruct-v0.3",
-        fallback_model_id="google/gemma-2-9b-it",
-        hf_client=None,
-    )
-    content = await content_creator.generate(report, profile, github_data)
-    last_content = content
-
-    # Save
-    data_store = DataStore("./data")
-    run_id = f"run_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
-    data_store.save_profile_snapshot(profile, run_id)
-    data_store.save_optimization_report(report, run_id)
-    data_store.save_content_package(content, run_id)
-
-    # Build response
-    sections = [
-        SectionScoreResponse(
-            section_name=s.section_name,
-            overall_score=s.overall_score,
-            missing=s.missing,
-            factors=[{"name": f.factor_name, "score": f.score, "explanation": f.explanation} for f in s.factor_scores],
-        )
-        for s in report.sections
-    ]
-
-    recommendations = []
-    for insight in report.insights:
-        for rec in insight.recommendations:
-            recommendations.append(RecommendationResponse(
-                element=rec.element,
-                modification=rec.modification,
-                priority=rec.priority.value,
-                guideline_reference=rec.guideline_reference,
-            ))
-
-    experience_suggested = []
-    for exp in (content.experience or []):
-        experience_suggested.append({
-            "role_title": exp.role_title,
-            "company": exp.company,
-            "bullets": exp.bullets,
-        })
-
-    post_ideas = []
-    for idea in (content.post_ideas or []):
-        post_ideas.append({
-            "topic": idea.topic,
-            "format": idea.format,
-            "outline": idea.content_outline,
-        })
-
-    return AnalysisResponse(
-        overall_score=report.overall_score,
-        sections=sections,
-        recommendations=recommendations,
-        headline_current=profile.headline,
-        headline_suggested=content.headline.text if content.headline else None,
-        about_current=profile.about,
-        about_suggested=content.about.text if content.about else None,
-        experience_current=profile.experience,
-        experience_suggested=experience_suggested,
-        skills=[s.get("name", "") for s in profile.skills],
-        certifications=[c.get("name", "") for c in (profile.certifications or [])],
-        post_ideas=post_ideas,
-        banner_suggestion={
-            "dimensions": content.banner.dimensions,
-            "colors": content.banner.color_palette,
-            "tagline": content.banner.tagline,
-        } if content.banner else None,
-        github_summary=report.github_summary,
-    )
-
-
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """AI-powered chat endpoint using OpenAI/Claude/HuggingFace."""
-    global last_profile, last_report, last_content
-
-    msg = request.message
-    provider = (request.context or {}).get("provider", "huggingface")  # default to free HF model
-    api_key = (request.context or {}).get("api_key", "") or os.environ.get("HF_TOKEN", "")
-
-    # Build profile context for the AI
-    profile_context = ""
-    if last_profile:
-        profile_context = f"""
-Current LinkedIn Profile:
-- Headline: {last_profile.headline}
-- About: {last_profile.about[:300]}
-- Skills: {', '.join(s.get('name','') for s in last_profile.skills[:10])}
-- Experience: {len(last_profile.experience)} roles
-"""
-    if last_report:
-        profile_context += f"\nProfile Score: {last_report.overall_score}/100"
-        for s in last_report.sections:
-            profile_context += f"\n- {s.section_name}: {s.overall_score}/100 {'(missing)' if s.missing else ''}"
-
-    if last_content:
-        if last_content.headline:
-            profile_context += f"\n\nSuggested Headline: {last_content.headline.text}"
-        if last_content.about:
-            profile_context += f"\nSuggested About: {last_content.about.text[:200]}..."
-
-    # System prompt for LinkedIn optimization expertise
-    system_prompt = """You are an expert LinkedIn Profile Optimization Coach. You help professionals improve their LinkedIn profiles for maximum visibility, engagement, and career opportunities.
-
-Your expertise includes:
-- Writing compelling headlines (max 220 chars) with keywords and value propositions
-- Crafting engaging About sections with narrative hooks, keywords, and CTAs
-- Optimizing experience bullets with action verbs and metrics
-- Recommending posting strategies for thought leadership
-- LinkedIn algorithm knowledge (search ranking, content distribution)
-- Professional branding and positioning
+Your expertise:
+- LinkedIn SEO (keywords, search ranking)
+- Headline optimization (220 chars, value props, keywords)
+- About section writing (hooks, CTAs, narrative structure)
+- Experience bullets (STAR method, metrics, action verbs)
+- Content strategy (post topics, formats, frequency)
+- Profile visuals (banner, photo best practices)
+- Skills & endorsements optimization
+- LinkedIn algorithm knowledge
 
 Rules:
-- Always provide specific, actionable suggestions (not generic advice)
-- Reference LinkedIn's algorithm and best practices when relevant
-- Keep suggestions within LinkedIn's character limits
-- Maintain the user's professional voice and domain expertise
-- When suggesting content, make it ready to copy-paste
-- If asked to rewrite something, provide the full rewritten version
-- Be concise but thorough
-
+- Always provide specific text the user can copy-paste
+- Keep character limits in mind (headline: 220, about: 2600)
+- Reference LinkedIn data/research when possible
+- If asked to rewrite, give the FULL rewritten version
+- Be concise — max 200 words per response unless writing full sections
 """
-    if profile_context:
-        system_prompt += f"\nUser's current profile data:\n{profile_context}"
-
-    # Try AI providers
-    try:
-        if provider == "openai" and api_key:
-            reply = await _call_openai(api_key, system_prompt, msg)
-        elif provider == "anthropic" and api_key:
-            reply = await _call_anthropic(api_key, system_prompt, msg)
-        elif provider == "gemini" and api_key:
-            reply = await _call_gemini(api_key, system_prompt, msg)
-        elif provider == "huggingface" and api_key:
-            reply = await _call_huggingface(api_key, system_prompt, msg)
-        else:
-            # Built-in responses (no API key needed)
-            reply = _builtin_response(msg, last_profile, last_report, last_content)
-    except Exception as e:
-        reply = f"API Error: {str(e)[:200]}. Check your API key and try again."
-
-    return ChatResponse(reply=reply)
 
 
-async def _call_openai(api_key: str, system_prompt: str, message: str) -> str:
-    """Call OpenAI GPT-4 for chat responses."""
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(api_key=api_key)
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message},
-        ],
-        max_tokens=1000,
-        temperature=0.7,
-    )
-    return response.choices[0].message.content
+def get_hf_token():
+    return os.environ.get("HF_TOKEN", "")
 
 
-async def _call_anthropic(api_key: str, system_prompt: str, message: str) -> str:
-    """Call Claude for chat responses."""
-    from anthropic import AsyncAnthropic
+# ─── LinkedIn Scraping ─────────────────────────────────────────────────────
+async def scrape_linkedin(profile_url: str, li_at_cookie: str) -> dict:
+    """Scrape LinkedIn profile using Voyager API"""
+    # Extract username from URL
+    username = profile_url.rstrip("/").split("/")[-1]
+    if not username:
+        return {"error": "Could not extract username from URL"}
 
-    client = AsyncAnthropic(api_key=api_key)
-    response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": message}],
-    )
-    return response.content[0].text
-
-
-async def _call_huggingface(api_key: str, system_prompt: str, message: str) -> str:
-    """Call free model via HuggingFace Router (Llama 3.3 70B via Together)."""
-    import httpx as _httpx
-
-    async with _httpx.AsyncClient(verify=False, timeout=60.0) as client:
-        r = await client.post(
-            "https://router.huggingface.co/together/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message},
-                ],
-                "max_tokens": 1000,
-                "temperature": 0.7,
-            },
-        )
-        if r.status_code == 200:
-            data = r.json()
-            return data["choices"][0]["message"]["content"]
-        return f"AI API error ({r.status_code}): {r.text[:150]}"
-
-
-async def _call_gemini(api_key: str, system_prompt: str, message: str) -> str:
-    """Call Google Gemini for chat responses."""
-    from google import genai
-
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=f"{system_prompt}\n\nUser: {message}",
-    )
-    return response.text
-
-
-def _builtin_response(msg: str, profile, report, content) -> str:
-    """Built-in responses when no AI API key is configured."""
-    lower = msg.lower()
-
-    if not profile:
-        return "Please run an analysis first by uploading your resume, then I can help optimize your profile."
-
-    if any(kw in lower for kw in ["headline", "title"]):
-        current = profile.headline
-        suggested = content.headline.text if content and content.headline else None
-        if suggested:
-            return f"**Current headline:** {current}\n\n**Optimized headline:**\n> {suggested}\n\n**Why it's better:**\n- Uses more of the 220-character limit\n- Includes searchable keywords\n- Has a value proposition\n\nWant a different angle? Tell me what to emphasize."
-        return f"Your headline: \"{current}\"\n\nTo improve, add a value proposition and keywords. Example:\n> {current} | Delivering [result] through [expertise]"
-
-    elif any(kw in lower for kw in ["about", "summary", "bio"]):
-        if content and content.about:
-            return f"**Optimized About section:**\n\n{content.about.text}\n\n---\n**Structure used:**\n- Hook: _{content.about.hook_sentence}_\n- Keywords: {', '.join(content.about.keywords_used)}\n- CTA: _{content.about.call_to_action}_"
-        return "Your about section needs a narrative hook in the first line and a call-to-action at the end. Tell me your target audience and I'll draft one."
-
-    elif any(kw in lower for kw in ["post", "content", "publish", "write"]):
-        if content and content.post_ideas:
-            ideas = "\n".join(f"{i+1}. **{p.topic}** ({p.format})\n   {p.content_outline}" for i, p in enumerate(content.post_ideas[:4]))
-            return f"**Your personalized post ideas:**\n\n{ideas}\n\nWant me to expand any of these into a full draft?"
-        return "Start posting 2-3x/week. Best formats: carousels (highest reach), polls (engagement), text posts (thought leadership)."
-
-    elif any(kw in lower for kw in ["score", "rating", "analysis", "how am i"]):
-        if report:
-            lines = "\n".join(f"- **{s.section_name.title()}**: {s.overall_score}/100 {'🟢' if s.overall_score >= 70 else '🟡' if s.overall_score >= 50 else '🔴'}" for s in report.sections)
-            return f"**Your profile scores:**\n\n{lines}\n\n**Overall: {report.overall_score}/100**\n\nFocus on the red sections first — they have the most improvement potential."
-        return "Run analysis first to see scores."
-
-    elif any(kw in lower for kw in ["experience", "bullet", "job", "work"]):
-        if content and content.experience:
-            exp = content.experience[0]
-            bullets = "\n".join(f"• {b}" for b in exp.bullets[:4])
-            return f"**Optimized bullets for {exp.role_title} at {exp.company}:**\n\n{bullets}\n\n**Tips applied:** Action verbs, quantifiable metrics, role-aligned keywords."
-        return "For experience bullets: Start with action verbs (Led, Built, Drove), include metrics (%, $, time), align with your target role."
-
-    elif any(kw in lower for kw in ["skill", "endorse"]):
-        skills = ", ".join(s.get("name", "") for s in profile.skills[:8])
-        return f"**Your skills:** {skills}\n\n**Action items:**\n1. Pin your top 3 role-relevant skills\n2. Ask 5 colleagues to endorse them this week\n3. Remove skills not related to your target role\n\nWhich role are you targeting?"
-
-    elif any(kw in lower for kw in ["banner", "photo", "picture"]):
-        return "**Profile visuals checklist:**\n\n📸 **Photo:** Professional headshot, 400x400px min, face fills 60% of frame\n\n🖼️ **Banner (1584×396px):** Use Canva → search 'LinkedIn banner' → add:\n- Your name + title\n- 2-3 key skills or certs\n- Professional color scheme\n\nThese alone can increase profile views 20-30%."
-
-    elif any(kw in lower for kw in ["recommend", "suggestion", "fix", "improve"]):
-        if report:
-            recs = []
-            for insight in report.insights:
-                for rec in insight.recommendations[:2]:
-                    recs.append(f"{'🔴' if rec.priority.value == 'high' else '🟡' if rec.priority.value == 'medium' else '🟢'} **{rec.priority.value.upper()}:** {rec.modification}")
-            return "**Top recommendations:**\n\n" + "\n\n".join(recs[:8])
-        return "Run analysis first to get personalized recommendations."
-
-    else:
-        return "I can help with:\n\n• **\"Improve my headline\"** — get an optimized headline\n• **\"Rewrite my about\"** — new about section with hook + CTA\n• **\"Post ideas\"** — content suggestions for this week\n• **\"Fix my experience\"** — better bullets with metrics\n• **\"My scores\"** — see section-by-section breakdown\n• **\"Banner tips\"** — visual branding suggestions\n\nWhat would you like to work on?"
-
-
-@app.get("/api/health")
-async def health():
-    return {"status": "ok", "version": "1.0.0"}
-
-
-# ─── Settings / API Key Storage ──────────────────────────────────────────────
-
-class SettingsRequest(BaseModel):
-    provider: str  # openai, anthropic, huggingface
-    api_key: str
-    linkedin_cookie: Optional[str] = None  # li_at cookie for session-based access
-
-_settings = {"provider": "builtin", "api_key": "", "linkedin_cookie": ""}
-
-@app.post("/api/settings")
-async def save_settings(req: SettingsRequest):
-    """Save user's AI provider settings and LinkedIn session."""
-    global _settings
-    _settings["provider"] = req.provider
-    _settings["api_key"] = req.api_key
-    if req.linkedin_cookie:
-        _settings["linkedin_cookie"] = req.linkedin_cookie
-    return {"status": "saved", "provider": req.provider}
-
-@app.get("/api/settings")
-async def get_settings():
-    """Get current settings (masked key)."""
-    key = _settings["api_key"]
-    masked = key[:8] + "..." if len(key) > 8 else "not set"
-    return {
-        "provider": _settings["provider"],
-        "api_key_masked": masked,
-        "has_linkedin_cookie": bool(_settings.get("linkedin_cookie")),
+    headers = {
+        "csrf-token": "ajax:0",
+        "x-restli-protocol-version": "2.0.0",
+        "cookie": f"li_at={li_at_cookie}; JSESSIONID=\"ajax:0\"",
     }
 
+    async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+        # Get profile data
+        try:
+            resp = await client.get(
+                f"https://www.linkedin.com/voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity={username}&decorationId=com.linkedin.voyager.dash.deco.identity.profile.WebProfileCardOverlay-75",
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                # Try alternative endpoint
+                resp = await client.get(
+                    f"https://www.linkedin.com/voyager/api/identity/profiles/{username}/profileView",
+                    headers=headers,
+                )
 
-# ─── LinkedIn Session-Based Scraping ─────────────────────────────────────────
+            if resp.status_code == 200:
+                data = resp.json()
+            else:
+                return {"error": f"LinkedIn API returned {resp.status_code}. Check your li_at cookie."}
+        except Exception as e:
+            return {"error": f"Failed to connect to LinkedIn: {str(e)}"}
 
-@app.post("/api/scrape-linkedin")
-async def scrape_linkedin(linkedin_url: str = Form(""), cookie: str = Form("")):
-    """Scrape LinkedIn profile using session cookie (li_at).
+        # Try to get full profile view
+        try:
+            profile_resp = await client.get(
+                f"https://www.linkedin.com/voyager/api/identity/profiles/{username}/profileView",
+                headers=headers,
+            )
+            if profile_resp.status_code == 200:
+                profile_data = profile_resp.json()
+            else:
+                profile_data = data
+        except:
+            profile_data = data
 
-    Users can provide their LinkedIn li_at cookie from their browser
-    to enable authenticated profile scraping without OAuth app setup.
-    """
-    import httpx as _httpx
-
-    url = linkedin_url.strip()
-    session_cookie = cookie.strip() or _settings.get("linkedin_cookie", "")
-
-    if not url:
-        return {"success": False, "error": "No LinkedIn URL provided"}
-
-    if not session_cookie:
-        return {
-            "success": False,
-            "error": "No LinkedIn session cookie. Go to linkedin.com while logged in → F12 → Application → Cookies → copy 'li_at' value → paste in Settings.",
-        }
-
-    # Extract username from URL
-    username = url.rstrip("/").split("/in/")[-1].split("/")[0] if "/in/" in url else ""
-
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Cookie": f"li_at={session_cookie}",
-            "Accept": "application/vnd.linkedin.normalized+json+2.1",
-            "X-Restli-Protocol-Version": "2.0.0",
-        }
-
-        # Use LinkedIn's Voyager API (internal API used by the frontend)
-        api_url = f"https://www.linkedin.com/voyager/api/identity/profiles/{username}/profileView"
-
-        async with _httpx.AsyncClient(verify=False, timeout=15.0) as client:
-            r = await client.get(api_url, headers=headers)
-
-        if r.status_code == 200:
-            data = r.json()
-            # Parse the Voyager response into our format
-            profile_data = _parse_voyager_response(data, username)
-            return {"success": True, "profile": profile_data}
-        elif r.status_code == 401:
-            return {"success": False, "error": "LinkedIn session expired. Please get a fresh li_at cookie."}
-        elif r.status_code == 403:
-            return {"success": False, "error": "Access denied. The li_at cookie may be invalid."}
-        else:
-            return {"success": False, "error": f"LinkedIn returned status {r.status_code}"}
-
-    except Exception as e:
-        return {"success": False, "error": f"Scraping failed: {str(e)[:200]}"}
+        # Parse profile
+        profile = parse_linkedin_profile(profile_data, username)
+        return profile
 
 
-def _parse_voyager_response(data: dict, username: str) -> dict:
-    """Parse LinkedIn Voyager API response into profile data."""
-    profile = {}
+def parse_linkedin_profile(data: dict, username: str) -> dict:
+    """Parse LinkedIn Voyager API response into structured profile"""
+    profile = {
+        "username": username,
+        "name": "",
+        "headline": "",
+        "about": "",
+        "location": "",
+        "connections": 0,
+        "experience": [],
+        "education": [],
+        "skills": [],
+        "certifications": [],
+        "projects": [],
+        "recommendations": 0,
+    }
 
     try:
-        # The response structure varies but typically has 'included' array
-        included = data.get("included", [])
+        # Try different data structures
+        if "profile" in data:
+            p = data["profile"]
+            profile["name"] = f"{p.get('firstName', '')} {p.get('lastName', '')}".strip()
+            profile["headline"] = p.get("headline", "")
+            profile["about"] = p.get("summary", "")
+            profile["location"] = p.get("locationName", "")
+        elif "elements" in data:
+            elements = data["elements"]
+            if elements:
+                p = elements[0]
+                profile["name"] = f"{p.get('firstName', '')} {p.get('lastName', '')}".strip()
+                profile["headline"] = p.get('headline', '')
+                profile["about"] = p.get('summary', '')
+        elif "included" in data:
+            for item in data.get("included", []):
+                if item.get("$type") == "com.linkedin.voyager.identity.profile.Profile":
+                    profile["name"] = f"{item.get('firstName', '')} {item.get('lastName', '')}".strip()
+                    profile["headline"] = item.get("headline", "")
+                    profile["about"] = item.get("summary", "")
+                    profile["location"] = item.get("locationName", "")
 
-        for item in included:
-            entity_type = item.get("$type", "")
-
-            if "Profile" in entity_type and "firstName" in item:
-                profile["headline"] = item.get("headline", "")
-                profile["about"] = item.get("summary", "")
-                profile["firstName"] = item.get("firstName", "")
-                profile["lastName"] = item.get("lastName", "")
-                profile["follower_count"] = item.get("followersCount", 0)
-
-            elif "Position" in entity_type:
-                if "experience" not in profile:
-                    profile["experience"] = []
+        # Parse experience
+        if "positionView" in data:
+            positions = data["positionView"].get("elements", [])
+            for pos in positions:
                 profile["experience"].append({
-                    "title": item.get("title", ""),
-                    "company": item.get("companyName", ""),
-                    "description": item.get("description", ""),
+                    "title": pos.get("title", ""),
+                    "company": pos.get("companyName", ""),
+                    "description": pos.get("description", ""),
+                })
+        elif "included" in data:
+            for item in data.get("included", []):
+                if item.get("$type", "").endswith("Position"):
+                    profile["experience"].append({
+                        "title": item.get("title", ""),
+                        "company": item.get("companyName", ""),
+                        "description": item.get("description", ""),
+                    })
+
+        # Parse education
+        if "educationView" in data:
+            education = data["educationView"].get("elements", [])
+            for edu in education:
+                profile["education"].append({
+                    "school": edu.get("schoolName", ""),
+                    "degree": edu.get("degreeName", ""),
+                    "field": edu.get("fieldOfStudy", ""),
                 })
 
-            elif "Skill" in entity_type:
-                if "skills" not in profile:
-                    profile["skills"] = []
-                name = item.get("name", "")
-                if name:
-                    profile["skills"].append({"name": name, "endorsements": 0})
+        # Parse skills
+        if "skillView" in data:
+            skills = data["skillView"].get("elements", [])
+            profile["skills"] = [s.get("name", "") for s in skills]
 
-    except Exception:
-        pass
-
-    if not profile.get("headline"):
-        profile["headline"] = f"LinkedIn profile: {username}"
+    except Exception as e:
+        profile["parse_error"] = str(e)
 
     return profile
 
 
+# ─── GitHub Scraping ───────────────────────────────────────────────────────
+async def scrape_github(github_url: str) -> dict:
+    """Scrape GitHub profile data"""
+    # Extract username
+    username = github_url.rstrip("/").split("/")[-1]
+    if not username:
+        return {"error": "Could not extract GitHub username"}
+
+    async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+        try:
+            # Get user profile
+            user_resp = await client.get(f"https://api.github.com/users/{username}")
+            if user_resp.status_code != 200:
+                return {"error": f"GitHub API returned {user_resp.status_code}"}
+            user_data = user_resp.json()
+
+            # Get repos
+            repos_resp = await client.get(
+                f"https://api.github.com/users/{username}/repos?sort=stars&per_page=10"
+            )
+            repos_data = repos_resp.json() if repos_resp.status_code == 200 else []
+
+            return {
+                "username": username,
+                "name": user_data.get("name", ""),
+                "bio": user_data.get("bio", ""),
+                "public_repos": user_data.get("public_repos", 0),
+                "followers": user_data.get("followers", 0),
+                "following": user_data.get("following", 0),
+                "company": user_data.get("company", ""),
+                "blog": user_data.get("blog", ""),
+                "top_repos": [
+                    {
+                        "name": r.get("name", ""),
+                        "description": r.get("description", ""),
+                        "stars": r.get("stargazers_count", 0),
+                        "language": r.get("language", ""),
+                        "forks": r.get("forks_count", 0),
+                    }
+                    for r in repos_data[:10]
+                ],
+                "languages": list(set(r.get("language", "") for r in repos_data if r.get("language"))),
+            }
+        except Exception as e:
+            return {"error": f"Failed to fetch GitHub data: {str(e)}"}
+
+
+# ─── Resume Parsing ────────────────────────────────────────────────────────
+def parse_resume(file_bytes: bytes) -> str:
+    """Extract text from PDF resume"""
+    try:
+        reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""
+        return text.strip()
+    except Exception as e:
+        return f"Error parsing PDF: {str(e)}"
+
+
+# ─── Profile Scoring ──────────────────────────────────────────────────────
+def score_profile(linkedin: dict, resume: str, github: dict) -> dict:
+    """Score the LinkedIn profile across 6 dimensions"""
+    scores = {
+        "headline": 0,
+        "about": 0,
+        "experience": 0,
+        "skills": 0,
+        "education": 0,
+        "engagement": 0,
+    }
+    recommendations = []
+
+    # Headline scoring (0-100)
+    headline = linkedin.get("headline", "") if linkedin else ""
+    if headline:
+        scores["headline"] = 30
+        if len(headline) > 50:
+            scores["headline"] += 20
+        if len(headline) > 100:
+            scores["headline"] += 20
+        if "|" in headline or "•" in headline or "—" in headline:
+            scores["headline"] += 15
+        if any(kw in headline.lower() for kw in ["help", "specialist", "expert", "leader", "engineer", "developer"]):
+            scores["headline"] += 15
+    else:
+        recommendations.append("Add a compelling headline — it's the first thing people see")
+
+    # About scoring (0-100)
+    about = linkedin.get("about", "") if linkedin else ""
+    if about:
+        scores["about"] = 30
+        if len(about) > 200:
+            scores["about"] += 20
+        if len(about) > 500:
+            scores["about"] += 15
+        if len(about) > 1000:
+            scores["about"] += 10
+        if any(c in about for c in ["📧", "🔗", "💡", "🚀", "→", "•"]):
+            scores["about"] += 10
+        if "http" in about or "@" in about:
+            scores["about"] += 15
+    else:
+        recommendations.append("Write an About section — profiles with summaries get 10x more views")
+
+    # Experience scoring (0-100)
+    experience = linkedin.get("experience", []) if linkedin else []
+    if experience:
+        scores["experience"] = 30
+        if len(experience) >= 2:
+            scores["experience"] += 15
+        if len(experience) >= 4:
+            scores["experience"] += 15
+        has_descriptions = sum(1 for e in experience if e.get("description"))
+        if has_descriptions > 0:
+            scores["experience"] += 20
+        if has_descriptions == len(experience):
+            scores["experience"] += 20
+    else:
+        recommendations.append("Add work experience with detailed bullet points")
+
+    # Skills scoring (0-100)
+    skills = linkedin.get("skills", []) if linkedin else []
+    if skills:
+        scores["skills"] = 40
+        if len(skills) >= 5:
+            scores["skills"] += 20
+        if len(skills) >= 10:
+            scores["skills"] += 20
+        if len(skills) >= 20:
+            scores["skills"] += 20
+    else:
+        recommendations.append("Add at least 10 relevant skills to improve search visibility")
+
+    # Education scoring (0-100)
+    education = linkedin.get("education", []) if linkedin else []
+    if education:
+        scores["education"] = 50
+        if len(education) >= 2:
+            scores["education"] += 25
+        if any(e.get("field") for e in education):
+            scores["education"] += 25
+    else:
+        scores["education"] = 30  # Not everyone has formal education listed
+
+    # Engagement scoring (0-100) — based on GitHub + connections
+    if github and not github.get("error"):
+        scores["engagement"] = 40
+        if github.get("followers", 0) > 10:
+            scores["engagement"] += 15
+        if github.get("public_repos", 0) > 5:
+            scores["engagement"] += 15
+        if github.get("public_repos", 0) > 15:
+            scores["engagement"] += 15
+        if github.get("followers", 0) > 50:
+            scores["engagement"] += 15
+    else:
+        scores["engagement"] = 40
+
+    connections = linkedin.get("connections", 0) if linkedin else 0
+    if connections > 100:
+        scores["engagement"] = min(100, scores["engagement"] + 10)
+    if connections > 500:
+        scores["engagement"] = min(100, scores["engagement"] + 10)
+
+    # Calculate overall
+    overall = round(sum(scores.values()) / len(scores))
+
+    # Generate post ideas based on profile
+    post_ideas = generate_post_ideas(linkedin, github, resume)
+
+    return {
+        "overall": overall,
+        "sections": scores,
+        "recommendations": recommendations,
+        "post_ideas": post_ideas,
+    }
+
+
+def generate_post_ideas(linkedin: dict, github: dict, resume: str) -> list:
+    """Generate content post ideas based on profile data"""
+    ideas = []
+
+    if linkedin:
+        headline = linkedin.get("headline", "")
+        experience = linkedin.get("experience", [])
+        if experience:
+            latest = experience[0]
+            ideas.append(f"🎯 '3 lessons I learned as a {latest.get('title', 'professional')} at {latest.get('company', 'my company')}'")
+            ideas.append(f"📊 'The biggest misconception about {latest.get('title', 'my role')}...'")
+
+    if github and not github.get("error"):
+        languages = github.get("languages", [])
+        if languages:
+            ideas.append(f"💻 'Why I chose {languages[0]} for my latest project (and what surprised me)'")
+        repos = github.get("top_repos", [])
+        if repos:
+            ideas.append(f"🚀 'I built {repos[0].get('name', 'a project')} — here's what I learned about {repos[0].get('language', 'coding')}'")
+
+    # Generic ideas
+    ideas.extend([
+        "📈 'The #1 thing that accelerated my career growth (it's not what you think)'",
+        "🤔 'Hot take: [controversial opinion about your industry]'",
+        "📚 'The book that changed how I approach [your field]'",
+    ])
+
+    return ideas[:6]
+
+
+# ─── API Endpoints ─────────────────────────────────────────────────────────
+
+@app.post("/api/analyze")
+async def analyze_profile(
+    resume: Optional[UploadFile] = File(None),
+    github_url: Optional[str] = Form(None),
+    linkedin_url: Optional[str] = Form(None),
+    li_at_cookie: Optional[str] = Form(None),
+):
+    """Analyze LinkedIn profile, resume, and GitHub"""
+    results = {
+        "linkedin": None,
+        "resume": None,
+        "github": None,
+    }
+
+    # Scrape LinkedIn
+    if linkedin_url and li_at_cookie:
+        linkedin_data = await scrape_linkedin(linkedin_url, li_at_cookie)
+        results["linkedin"] = linkedin_data
+        profile_store["linkedin"] = linkedin_data
+    elif linkedin_url:
+        results["linkedin"] = {"error": "li_at cookie is required for LinkedIn scraping"}
+
+    # Parse resume
+    if resume:
+        file_bytes = await resume.read()
+        resume_text = parse_resume(file_bytes)
+        results["resume"] = resume_text
+        profile_store["resume"] = resume_text
+
+    # Scrape GitHub
+    if github_url:
+        github_data = await scrape_github(github_url)
+        results["github"] = github_data
+        profile_store["github"] = github_data
+
+    # Score the profile
+    analysis = score_profile(
+        results["linkedin"],
+        results["resume"],
+        results["github"],
+    )
+    results["analysis"] = analysis
+    profile_store["analysis"] = analysis
+
+    return results
+
+
+class ChatRequest(BaseModel):
+    messages: List[dict]
+    model: Optional[str] = None
+    hf_token: Optional[str] = None
+
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
+    """Chat with AI about profile optimization"""
+    token = request.hf_token or get_hf_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="No HF token available. Set HF_TOKEN env var or provide hf_token.")
+
+    model = request.model or AI_MODEL
+
+    # Build context from stored profile data
+    context_parts = []
+    if profile_store["linkedin"]:
+        context_parts.append(f"## LinkedIn Profile Data:\n{json.dumps(profile_store['linkedin'], indent=2)}")
+    if profile_store["resume"]:
+        context_parts.append(f"## Resume Content:\n{profile_store['resume'][:3000]}")
+    if profile_store["github"]:
+        context_parts.append(f"## GitHub Profile:\n{json.dumps(profile_store['github'], indent=2)}")
+    if profile_store["analysis"]:
+        context_parts.append(f"## Profile Analysis Scores:\n{json.dumps(profile_store['analysis'], indent=2)}")
+
+    context = "\n\n".join(context_parts)
+
+    # Build system message with context
+    system_message = SYSTEM_PROMPT
+    if context:
+        system_message += f"\n\n--- USER'S PROFILE DATA (use this to give personalized advice) ---\n\n{context}"
+
+    # Build messages for API
+    api_messages = [{"role": "system", "content": system_message}]
+    api_messages.extend(request.messages)
+
+    # Call HuggingFace Router
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": api_messages,
+        "max_tokens": 1000,
+        "temperature": 0.7,
+    }
+
+    async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+        try:
+            resp = await client.post(AI_ENDPOINT, headers=headers, json=payload)
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=f"AI API error: {resp.text}"
+                )
+            data = resp.json()
+            return {
+                "response": data["choices"][0]["message"]["content"],
+                "model": model,
+            }
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="AI request timed out")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"AI request failed: {str(e)}")
+
+
+# ─── Serve Frontend ────────────────────────────────────────────────────────
+
+@app.get("/")
+async def serve_index():
+    return FileResponse("web/static/index.html")
+
+
+app.mount("/static", StaticFiles(directory="web/static"), name="static")
+
+
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
