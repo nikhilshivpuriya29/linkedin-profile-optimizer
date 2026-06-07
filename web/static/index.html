@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Profile Optimizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        linkedin: { DEFAULT: '#0A66C2', dark: '#004182', light: '#70B5F9' },
+                        surface: { light: '#ffffff', dark: '#0f172a' },
+                        card: { light: '#f8fafc', dark: '#1e293b' },
+                        border: { light: '#e2e8f0', dark: '#334155' },
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
+        @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .animate-pulse-slow { animation: pulse-slow 2s infinite; }
+        .gradient-text { background: linear-gradient(135deg, #0A66C2, #70B5F9); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+// ─── Icons ────────────────────────────────────────────────────────────────
+const Icons = {
+    Sun: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
+    Moon: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>,
+    Upload: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>,
+    Send: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>,
+    Sparkles: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>,
+    Check: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>,
+    Github: () => <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>,
+};
+
+// ─── Score Ring Component ─────────────────────────────────────────────────
+function ScoreRing({ score, size = 120, label }) {
+    const radius = (size - 12) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (score / 100) * circumference;
+    const color = score >= 70 ? '#10b981' : score >= 50 ? '#f59e0b' : '#ef4444';
+
+    return (
+        <div className="flex flex-col items-center">
+            <svg width={size} height={size} className="transform -rotate-90">
+                <circle cx={size/2} cy={size/2} r={radius} stroke="currentColor" strokeWidth="8" fill="none" className="text-slate-200 dark:text-slate-700" />
+                <circle cx={size/2} cy={size/2} r={radius} stroke={color} strokeWidth="8" fill="none"
+                    strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+                    style={{ transition: 'stroke-dashoffset 1s ease-out' }} />
+            </svg>
+            <div className="absolute flex flex-col items-center justify-center" style={{width: size, height: size}}>
+                <span className="text-2xl font-bold">{score}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">/ 100</span>
+            </div>
+            {label && <span className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-400 capitalize">{label}</span>}
+        </div>
+    );
+}
+
+// ─── Profile Card Component ───────────────────────────────────────────────
+function ProfileCard({ data, type = "current" }) {
+    const isOptimized = type === "optimized";
+    const borderColor = isOptimized ? "border-emerald-500/30" : "border-slate-200 dark:border-slate-700";
+    const badge = isOptimized
+        ? <span className="px-2 py-0.5 text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full">✨ Optimized</span>
+        : <span className="px-2 py-0.5 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-full">Current</span>;
+
+    return (
+        <div className={`rounded-xl border ${borderColor} bg-white dark:bg-slate-900 overflow-hidden shadow-sm hover:shadow-md transition-all duration-300`}>
+            {/* Banner */}
+            <div className={`h-20 ${isOptimized ? 'bg-gradient-to-r from-emerald-600 to-teal-500' : 'bg-gradient-to-r from-linkedin to-linkedin-dark'}`} />
+
+            {/* Content */}
+            <div className="px-5 pb-5">
+                <div className="flex items-end justify-between -mt-8 mb-3">
+                    <div className="w-16 h-16 rounded-full bg-slate-200 dark:bg-slate-700 border-4 border-white dark:border-slate-900 flex items-center justify-center text-2xl">👤</div>
+                    {badge}
+                </div>
+
+                {/* Headline */}
+                <h3 className="font-semibold text-base leading-tight mb-2">{data.headline || 'No headline'}</h3>
+
+                {/* About */}
+                {data.about && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">About</h4>
+                        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-4">{data.about}</p>
+                    </div>
+                )}
+
+                {/* Experience */}
+                {data.experience && data.experience.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Experience</h4>
+                        {data.experience.slice(0, 2).map((exp, i) => (
+                            <div key={i} className="mb-2">
+                                <div className="text-sm font-medium">{exp.title || exp.role_title}</div>
+                                <div className="text-xs text-slate-500 dark:text-slate-400">{exp.company}</div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Skills */}
+                {data.skills && data.skills.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Skills</h4>
+                        <div className="flex flex-wrap gap-1.5">
+                            {data.skills.slice(0, 6).map((skill, i) => (
+                                <span key={i} className="px-2 py-0.5 text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md">{typeof skill === 'string' ? skill : skill.name}</span>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ─── Chat Message ─────────────────────────────────────────────────────────
+function ChatMessage({ message, isUser }) {
+    return (
+        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-fadeIn`}>
+            <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                isUser
+                    ? 'bg-linkedin text-white rounded-br-md'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-md'
+            }`}>
+                <div className="whitespace-pre-wrap">{message}</div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────
+function App() {
+    const [darkMode, setDarkMode] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState(null);
+    const [chatMessages, setChatMessages] = useState([
+        { text: "Hi! Upload your resume and I'll analyze your LinkedIn profile. Then ask me anything about improving it.", isUser: false }
+    ]);
+    const [chatInput, setChatInput] = useState('');
+    const [githubUrl, setGithubUrl] = useState('');
+    const chatEndRef = useRef(null);
+    const fileInputRef = useRef(null);
+
+    useEffect(() => {
+        document.documentElement.classList.toggle('dark', darkMode);
+    }, [darkMode]);
+
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [chatMessages]);
+
+    const handleUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setLoading(true);
+        const formData = new FormData();
+        formData.append('resume', file);
+        formData.append('github_url', githubUrl);
+        formData.append('linkedin_url', '');
+
+        try {
+            const res = await fetch('http://localhost:8000/api/analyze', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await res.json();
+            setResult(data);
+            setChatMessages(prev => [...prev, {
+                text: `✅ Analysis complete! Your overall score is ${data.overall_score}/100.\n\nI've identified improvements for your headline, about section, and more. Ask me about any section or say "show recommendations" to see what to fix first.`,
+                isUser: false
+            }]);
+        } catch (err) {
+            setChatMessages(prev => [...prev, { text: `❌ Error: ${err.message}. Make sure the API server is running (python api.py)`, isUser: false }]);
+        }
+        setLoading(false);
+    };
+
+    const handleChat = async () => {
+        if (!chatInput.trim()) return;
+        const msg = chatInput.trim();
+        setChatInput('');
+        setChatMessages(prev => [...prev, { text: msg, isUser: true }]);
+
+        try {
+            const res = await fetch('http://localhost:8000/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: msg }),
+            });
+            const data = await res.json();
+            setChatMessages(prev => [...prev, { text: data.reply, isUser: false }]);
+        } catch (err) {
+            setChatMessages(prev => [...prev, { text: "Couldn't reach the API. Is `python api.py` running?", isUser: false }]);
+        }
+    };
+
+    return (
+        <div className="h-screen flex flex-col overflow-hidden">
+            {/* Header */}
+            <header className="h-14 flex items-center justify-between px-6 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-10">
+                <div className="flex items-center gap-2">
+                    <span className="text-xl">🚀</span>
+                    <h1 className="text-lg font-semibold"><span className="gradient-text">LinkedIn</span> Profile Optimizer</h1>
+                </div>
+                <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    {darkMode ? <Icons.Sun /> : <Icons.Moon />}
+                </button>
+            </header>
+
+            {/* Main Content */}
+            <div className="flex-1 flex overflow-hidden">
+                {/* Left: Profile Comparison */}
+                <div className="flex-1 overflow-y-auto scrollbar-hide p-6">
+                    {/* Upload Section */}
+                    {!result && (
+                        <div className="max-w-lg mx-auto space-y-6 animate-fadeIn">
+                            <div className="text-center mb-8">
+                                <h2 className="text-2xl font-bold mb-2">Optimize Your Profile</h2>
+                                <p className="text-slate-500 dark:text-slate-400">Upload your resume, add GitHub, and get instant AI-powered suggestions</p>
+                            </div>
+
+                            {/* GitHub Input */}
+                            <div>
+                                <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">GitHub Username / URL</label>
+                                <div className="flex items-center gap-2">
+                                    <Icons.Github />
+                                    <input type="text" value={githubUrl} onChange={e => setGithubUrl(e.target.value)}
+                                        placeholder="nikhilshivpuriya29"
+                                        className="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-linkedin/50 outline-none transition" />
+                                </div>
+                            </div>
+
+                            {/* Upload Card */}
+                            <div onClick={() => fileInputRef.current?.click()}
+                                className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-10 text-center cursor-pointer hover:border-linkedin dark:hover:border-linkedin-light hover:bg-linkedin/5 transition-all duration-200 group">
+                                <div className="flex flex-col items-center gap-3">
+                                    <div className="p-3 rounded-full bg-linkedin/10 text-linkedin group-hover:scale-110 transition-transform">
+                                        <Icons.Upload />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium text-slate-700 dark:text-slate-200">Drop your Resume PDF here</p>
+                                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">or click to browse</p>
+                                    </div>
+                                </div>
+                                <input ref={fileInputRef} type="file" accept=".pdf" onChange={handleUpload} className="hidden" />
+                            </div>
+
+                            {loading && (
+                                <div className="flex items-center justify-center gap-3 py-4">
+                                    <div className="w-5 h-5 border-2 border-linkedin border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-sm text-slate-500 animate-pulse-slow">Analyzing your profile...</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Results */}
+                    {result && (
+                        <div className="space-y-6 animate-fadeIn">
+                            {/* Score Overview */}
+                            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-lg font-semibold">Profile Score</h2>
+                                    <button onClick={() => { setResult(null); setChatMessages([chatMessages[0]]); }}
+                                        className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">↺ New Analysis</button>
+                                </div>
+                                <div className="flex items-center gap-8 flex-wrap">
+                                    <div className="relative">
+                                        <ScoreRing score={result.overall_score} size={100} />
+                                    </div>
+                                    <div className="flex-1 grid grid-cols-3 gap-3">
+                                        {result.sections.map(s => (
+                                            <div key={s.section_name} className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                                                <div className={`text-lg font-bold ${s.overall_score >= 70 ? 'text-emerald-500' : s.overall_score >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{s.overall_score}</div>
+                                                <div className="text-xs text-slate-500 capitalize">{s.section_name.replace('_', ' ')}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Side-by-side Profiles */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <ProfileCard data={{
+                                    headline: result.headline_current,
+                                    about: result.about_current,
+                                    experience: result.experience_current,
+                                    skills: result.skills,
+                                }} type="current" />
+                                <ProfileCard data={{
+                                    headline: result.headline_suggested || result.headline_current,
+                                    about: result.about_suggested || result.about_current,
+                                    experience: result.experience_suggested.length ? result.experience_suggested : result.experience_current,
+                                    skills: result.skills,
+                                }} type="optimized" />
+                            </div>
+
+                            {/* Recommendations */}
+                            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+                                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">Top Recommendations</h3>
+                                <div className="space-y-2">
+                                    {result.recommendations.slice(0, 6).map((rec, i) => (
+                                        <div key={i} className="flex items-start gap-2 text-sm">
+                                            <span className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${rec.priority === 'high' ? 'bg-red-500' : rec.priority === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                                            <span className="text-slate-700 dark:text-slate-300">{rec.modification}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Post Ideas */}
+                            {result.post_ideas.length > 0 && (
+                                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+                                    <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">📝 Post Ideas</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {result.post_ideas.map((idea, i) => (
+                                            <div key={i} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                                                <div className="font-medium text-sm">{idea.topic}</div>
+                                                <div className="text-xs text-linkedin mt-1">{idea.format}</div>
+                                                <div className="text-xs text-slate-500 mt-1 line-clamp-2">{idea.outline}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Right: Chat Panel */}
+                <div className="w-96 border-l border-slate-200 dark:border-slate-800 flex flex-col bg-white dark:bg-slate-900">
+                    {/* Chat Header */}
+                    <div className="h-12 flex items-center px-4 border-b border-slate-200 dark:border-slate-800">
+                        <Icons.Sparkles />
+                        <span className="ml-2 text-sm font-semibold">AI Assistant</span>
+                    </div>
+
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto scrollbar-hide p-4 space-y-3">
+                        {chatMessages.map((msg, i) => <ChatMessage key={i} message={msg.text} isUser={msg.isUser} />)}
+                        <div ref={chatEndRef} />
+                    </div>
+
+                    {/* Quick Actions */}
+                    {result && (
+                        <div className="px-4 py-2 flex gap-2 overflow-x-auto scrollbar-hide border-t border-slate-100 dark:border-slate-800">
+                            {['Improve headline', 'Better about', 'Post ideas', 'My scores'].map(q => (
+                                <button key={q} onClick={() => { setChatInput(q); }}
+                                    className="flex-shrink-0 px-3 py-1 text-xs rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                                    {q}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Input */}
+                    <div className="p-3 border-t border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-2">
+                            <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleChat()}
+                                placeholder="Ask about your profile..."
+                                className="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm focus:ring-2 focus:ring-linkedin/50 outline-none transition" />
+                            <button onClick={handleChat}
+                                className="p-2 rounded-lg bg-linkedin text-white hover:bg-linkedin-dark transition-colors">
+                                <Icons.Send />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
