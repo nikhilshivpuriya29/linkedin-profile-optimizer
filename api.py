@@ -240,8 +240,32 @@ async def analyze(
         profile = parse_resume_pdf(tmp_path)
         os.unlink(tmp_path)
 
+    # Try LinkedIn URL extraction if no resume
+    if not profile and linkedin_url.strip():
+        try:
+            from linkedin_optimizer.scrapers.linkedin_mcp_client import LinkedInMCPClient
+            from linkedin_optimizer.scrapers.profile_scraper import ProfileScraper
+
+            mcp_client = LinkedInMCPClient({})
+            scraper = ProfileScraper(mcp_client, max_retries=2)
+            result = await scraper.extract(linkedin_url.strip())
+            if result.success and result.profile_data:
+                profile = result.profile_data
+        except Exception:
+            # MCP server not available — use LinkedIn URL as context hint
+            pass
+
     if not profile:
-        profile = ProfileData(headline="No profile data provided")
+        # If we only have LinkedIn URL but couldn't scrape, create minimal profile
+        if linkedin_url.strip():
+            # Extract username from URL for display
+            username = linkedin_url.strip().rstrip("/").split("/")[-1]
+            profile = ProfileData(
+                headline=f"LinkedIn user: {username}",
+                about="Profile data could not be extracted. Please upload your resume PDF for full analysis, or set up LinkedIn OAuth (see docs).",
+            )
+        else:
+            profile = ProfileData(headline="No profile data provided. Please upload a resume PDF or provide your LinkedIn URL.")
 
     last_profile = profile
 

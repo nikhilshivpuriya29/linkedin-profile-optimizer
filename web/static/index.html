@@ -158,6 +158,7 @@ function App() {
     const [darkMode, setDarkMode] = useState(true);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
+    const [linkedinUrl, setLinkedinUrl] = useState('');
     const [chatMessages, setChatMessages] = useState([
         { text: "Hi! Upload your resume and I'll analyze your LinkedIn profile. Then ask me anything about improving it.", isUser: false }
     ]);
@@ -176,13 +177,13 @@ function App() {
 
     const handleUpload = async (e) => {
         const file = e.target.files?.[0];
-        if (!file) return;
+        if (!file && !linkedinUrl.trim()) return;
 
         setLoading(true);
         const formData = new FormData();
-        formData.append('resume', file);
+        if (file) formData.append('resume', file);
         formData.append('github_url', githubUrl);
-        formData.append('linkedin_url', '');
+        formData.append('linkedin_url', linkedinUrl);
 
         try {
             const res = await fetch('http://localhost:8000/api/analyze', {
@@ -241,35 +242,57 @@ function App() {
                     {!result && (
                         <div className="max-w-lg mx-auto space-y-6 animate-fadeIn">
                             <div className="text-center mb-8">
-                                <h2 className="text-2xl font-bold mb-2">Optimize Your Profile</h2>
-                                <p className="text-slate-500 dark:text-slate-400">Upload your resume, add GitHub, and get instant AI-powered suggestions</p>
+                                <h2 className="text-2xl font-bold mb-2">Optimize Your LinkedIn Profile</h2>
+                                <p className="text-slate-500 dark:text-slate-400">Paste your LinkedIn URL, upload resume, or add GitHub — we'll analyze everything</p>
                             </div>
 
-                            {/* GitHub Input */}
-                            <div>
-                                <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">GitHub Username / URL</label>
-                                <div className="flex items-center gap-2">
-                                    <Icons.Github />
-                                    <input type="text" value={githubUrl} onChange={e => setGithubUrl(e.target.value)}
-                                        placeholder="nikhilshivpuriya29"
-                                        className="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-linkedin/50 outline-none transition" />
-                                </div>
+                            {/* LinkedIn URL Input - PRIMARY */}
+                            <div className="p-4 rounded-xl border-2 border-linkedin/30 bg-linkedin/5 dark:bg-linkedin/10">
+                                <label className="block text-sm font-semibold mb-1.5 text-linkedin dark:text-linkedin-light">LinkedIn Profile URL</label>
+                                <input type="text" value={linkedinUrl} onChange={e => setLinkedinUrl(e.target.value)}
+                                    placeholder="https://www.linkedin.com/in/your-username"
+                                    className="w-full px-3 py-2.5 rounded-lg border border-linkedin/30 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-linkedin/50 outline-none transition" />
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">We'll extract your public profile data for analysis</p>
                             </div>
 
-                            {/* Upload Card */}
+                            <div className="flex items-center gap-3">
+                                <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+                                <span className="text-xs text-slate-400">AND / OR</span>
+                                <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+                            </div>
+
+                            {/* Resume Upload */}
                             <div onClick={() => fileInputRef.current?.click()}
-                                className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-10 text-center cursor-pointer hover:border-linkedin dark:hover:border-linkedin-light hover:bg-linkedin/5 transition-all duration-200 group">
+                                className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-8 text-center cursor-pointer hover:border-linkedin dark:hover:border-linkedin-light hover:bg-linkedin/5 transition-all duration-200 group">
                                 <div className="flex flex-col items-center gap-3">
                                     <div className="p-3 rounded-full bg-linkedin/10 text-linkedin group-hover:scale-110 transition-transform">
                                         <Icons.Upload />
                                     </div>
                                     <div>
-                                        <p className="font-medium text-slate-700 dark:text-slate-200">Drop your Resume PDF here</p>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">or click to browse</p>
+                                        <p className="font-medium text-slate-700 dark:text-slate-200">Upload Resume PDF</p>
+                                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">For detailed experience and skills extraction</p>
                                     </div>
                                 </div>
                                 <input ref={fileInputRef} type="file" accept=".pdf" onChange={handleUpload} className="hidden" />
                             </div>
+
+                            {/* GitHub Input */}
+                            <div>
+                                <label className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">GitHub Username / URL (optional)</label>
+                                <div className="flex items-center gap-2">
+                                    <Icons.Github />
+                                    <input type="text" value={githubUrl} onChange={e => setGithubUrl(e.target.value)}
+                                        placeholder="your-github-username"
+                                        className="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-linkedin/50 outline-none transition" />
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1">Enriches your profile with open-source contributions</p>
+                            </div>
+
+                            {/* Analyze Button */}
+                            <button onClick={() => fileInputRef.current?.click()}
+                                className="w-full py-3 px-4 rounded-xl bg-linkedin hover:bg-linkedin-dark text-white font-semibold text-sm transition-colors shadow-lg shadow-linkedin/20">
+                                🔍 Analyze My Profile
+                            </button>
 
                             {loading && (
                                 <div className="flex items-center justify-center gap-3 py-4">
