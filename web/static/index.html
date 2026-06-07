@@ -164,6 +164,10 @@ function App() {
     ]);
     const [chatInput, setChatInput] = useState('');
     const [githubUrl, setGithubUrl] = useState('');
+    const [showSettings, setShowSettings] = useState(false);
+    const [aiProvider, setAiProvider] = useState('builtin');
+    const [aiApiKey, setAiApiKey] = useState('');
+    const [linkedinCookie, setLinkedinCookie] = useState('');
     const chatEndRef = useRef(null);
     const fileInputRef = useRef(null);
 
@@ -212,7 +216,10 @@ function App() {
             const res = await fetch('http://localhost:8000/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: msg }),
+                body: JSON.stringify({
+                    message: msg,
+                    context: { provider: aiProvider, api_key: aiApiKey }
+                }),
             });
             const data = await res.json();
             setChatMessages(prev => [...prev, { text: data.reply, isUser: false }]);
@@ -229,10 +236,68 @@ function App() {
                     <span className="text-xl">🚀</span>
                     <h1 className="text-lg font-semibold"><span className="gradient-text">LinkedIn</span> Profile Optimizer</h1>
                 </div>
-                <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                    {darkMode ? <Icons.Sun /> : <Icons.Moon />}
-                </button>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setShowSettings(!showSettings)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Settings">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
+                    <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                        {darkMode ? <Icons.Sun /> : <Icons.Moon />}
+                    </button>
+                </div>
             </header>
+
+            {/* Settings Panel */}
+            {showSettings && (
+                <div className="absolute top-14 right-4 z-50 w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl p-5 animate-fadeIn">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold">⚙️ Settings</h3>
+                        <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+                    </div>
+
+                    {/* AI Provider */}
+                    <div className="mb-4">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">AI Chat Provider</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {[
+                                {id: 'builtin', label: '🤖 Built-in', desc: 'No API key needed'},
+                                {id: 'openai', label: '🟢 OpenAI', desc: 'GPT-4o-mini'},
+                                {id: 'anthropic', label: '🟣 Claude', desc: 'Claude Sonnet'},
+                                {id: 'huggingface', label: '🟡 HuggingFace', desc: 'Mistral-7B'},
+                            ].map(p => (
+                                <button key={p.id} onClick={() => setAiProvider(p.id)}
+                                    className={`p-2 rounded-lg border text-left text-xs transition-all ${aiProvider === p.id ? 'border-linkedin bg-linkedin/5 dark:bg-linkedin/10' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}>
+                                    <div className="font-medium">{p.label}</div>
+                                    <div className="text-slate-500 mt-0.5">{p.desc}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* API Key */}
+                    {aiProvider !== 'builtin' && (
+                        <div className="mb-4">
+                            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">API Key</label>
+                            <input type="password" value={aiApiKey} onChange={e => setAiApiKey(e.target.value)}
+                                placeholder={aiProvider === 'openai' ? 'sk-...' : aiProvider === 'anthropic' ? 'sk-ant-...' : 'hf_...'}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm" />
+                        </div>
+                    )}
+
+                    {/* LinkedIn Cookie */}
+                    <div className="mb-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">LinkedIn Session (optional)</label>
+                        <p className="text-xs text-slate-400 mb-2">Paste your <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">li_at</code> cookie to enable direct profile scraping</p>
+                        <input type="password" value={linkedinCookie} onChange={e => setLinkedinCookie(e.target.value)}
+                            placeholder="AQEDAx... (from browser DevTools → Cookies)"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm" />
+                        <p className="text-xs text-slate-400 mt-1">How: LinkedIn.com → F12 → Application → Cookies → copy <code>li_at</code></p>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+                        <Icons.Check /> <span>Settings are stored locally in your browser only</span>
+                    </div>
+                </div>
+            )}
 
             {/* Main Content */}
             <div className="flex-1 flex overflow-hidden">
@@ -379,9 +444,14 @@ function App() {
                 {/* Right: Chat Panel */}
                 <div className="w-96 border-l border-slate-200 dark:border-slate-800 flex flex-col bg-white dark:bg-slate-900">
                     {/* Chat Header */}
-                    <div className="h-12 flex items-center px-4 border-b border-slate-200 dark:border-slate-800">
-                        <Icons.Sparkles />
-                        <span className="ml-2 text-sm font-semibold">AI Assistant</span>
+                    <div className="h-12 flex items-center justify-between px-4 border-b border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-2">
+                            <Icons.Sparkles />
+                            <span className="text-sm font-semibold">AI Assistant</span>
+                        </div>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">
+                            {aiProvider === 'builtin' ? '🤖 Built-in' : aiProvider === 'openai' ? '🟢 GPT-4' : aiProvider === 'anthropic' ? '🟣 Claude' : '🟡 HF'}
+                        </span>
                     </div>
 
                     {/* Messages */}

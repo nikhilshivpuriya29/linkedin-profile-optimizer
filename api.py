@@ -358,48 +358,315 @@ async def analyze(
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Chat endpoint for profile optimization questions."""
+    """AI-powered chat endpoint using OpenAI/Claude/HuggingFace."""
     global last_profile, last_report, last_content
 
-    msg = request.message.lower()
+    msg = request.message
+    provider = (request.context or {}).get("provider", "builtin")  # openai, anthropic, huggingface, builtin
+    api_key = (request.context or {}).get("api_key", "")
 
-    if not last_profile:
-        return ChatResponse(reply="Please run an analysis first by uploading your resume.")
+    # Build profile context for the AI
+    profile_context = ""
+    if last_profile:
+        profile_context = f"""
+Current LinkedIn Profile:
+- Headline: {last_profile.headline}
+- About: {last_profile.about[:300]}
+- Skills: {', '.join(s.get('name','') for s in last_profile.skills[:10])}
+- Experience: {len(last_profile.experience)} roles
+"""
+    if last_report:
+        profile_context += f"\nProfile Score: {last_report.overall_score}/100"
+        for s in last_report.sections:
+            profile_context += f"\n- {s.section_name}: {s.overall_score}/100 {'(missing)' if s.missing else ''}"
 
-    if any(kw in msg for kw in ["headline", "title"]):
-        current = last_profile.headline
-        suggested = last_content.headline.text if last_content and last_content.headline else "N/A"
-        reply = f"**Current:** {current}\n\n**Suggested:** {suggested}\n\nThe improved headline uses more of the 220-character limit, includes keywords, and adds a value proposition. Want me to try a different angle?"
+    if last_content:
+        if last_content.headline:
+            profile_context += f"\n\nSuggested Headline: {last_content.headline.text}"
+        if last_content.about:
+            profile_context += f"\nSuggested About: {last_content.about.text[:200]}..."
 
-    elif any(kw in msg for kw in ["about", "summary", "bio"]):
-        if last_content and last_content.about:
-            reply = f"**Suggested About section:**\n\n{last_content.about.text}\n\n---\n**Hook:** {last_content.about.hook_sentence}\n**CTA:** {last_content.about.call_to_action}"
+    # System prompt for LinkedIn optimization expertise
+    system_prompt = """You are an expert LinkedIn Profile Optimization Coach. You help professionals improve their LinkedIn profiles for maximum visibility, engagement, and career opportunities.
+
+Your expertise includes:
+- Writing compelling headlines (max 220 chars) with keywords and value propositions
+- Crafting engaging About sections with narrative hooks, keywords, and CTAs
+- Optimizing experience bullets with action verbs and metrics
+- Recommending posting strategies for thought leadership
+- LinkedIn algorithm knowledge (search ranking, content distribution)
+- Professional branding and positioning
+
+Rules:
+- Always provide specific, actionable suggestions (not generic advice)
+- Reference LinkedIn's algorithm and best practices when relevant
+- Keep suggestions within LinkedIn's character limits
+- Maintain the user's professional voice and domain expertise
+- When suggesting content, make it ready to copy-paste
+- If asked to rewrite something, provide the full rewritten version
+- Be concise but thorough
+
+"""
+    if profile_context:
+        system_prompt += f"\nUser's current profile data:\n{profile_context}"
+
+    # Try AI providers
+    try:
+        if provider == "openai" and api_key:
+            reply = await _call_openai(api_key, system_prompt, msg)
+        elif provider == "anthropic" and api_key:
+            reply = await _call_anthropic(api_key, system_prompt, msg)
+        elif provider == "huggingface" and api_key:
+            reply = await _call_huggingface(api_key, system_prompt, msg)
         else:
-            reply = "Your about section scored well. Consider adding a hook and CTA."
-
-    elif any(kw in msg for kw in ["post", "content", "write"]):
-        if last_content and last_content.post_ideas:
-            ideas = "\n".join(f"- **{p.topic}** ({p.format}): {p.content_outline[:80]}..." for p in last_content.post_ideas[:4])
-            reply = f"**Post ideas for you:**\n\n{ideas}\n\nWant me to expand any of these?"
-        else:
-            reply = "Start posting 2-3x/week. Best topics: lessons learned, how-tos, industry trends."
-
-    elif any(kw in msg for kw in ["score", "rating", "how"]):
-        if last_report:
-            lines = "\n".join(f"- {s.section_name.title()}: {s.overall_score}/100" for s in last_report.sections)
-            reply = f"**Your scores:**\n\n{lines}\n\n**Overall: {last_report.overall_score}/100**"
-        else:
-            reply = "Run analysis first."
-
-    else:
-        reply = "I can help with: headline, about section, experience bullets, post ideas, skills, banner. What would you like to improve?"
+            # Built-in responses (no API key needed)
+            reply = _builtin_response(msg, last_profile, last_report, last_content)
+    except Exception as e:
+        reply = f"API Error: {str(e)[:200]}. Check your API key and try again."
 
     return ChatResponse(reply=reply)
+
+
+async def _call_openai(api_key: str, system_prompt: str, message: str) -> str:
+    """Call OpenAI GPT-4 for chat responses."""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key)
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message},
+        ],
+        max_tokens=1000,
+        temperature=0.7,
+    )
+    return response.choices[0].message.content
+
+
+async def _call_anthropic(api_key: str, system_prompt: str, message: str) -> str:
+    """Call Claude for chat responses."""
+    from anthropic import AsyncAnthropic
+
+    client = AsyncAnthropic(api_key=api_key)
+    response = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1000,
+        system=system_prompt,
+        messages=[{"role": "user", "content": message}],
+    )
+    return response.content[0].text
+
+
+async def _call_huggingface(api_key: str, system_prompt: str, message: str) -> str:
+    """Call HuggingFace Inference API for chat responses."""
+    import httpx as _httpx
+
+    full_prompt = f"[System]: {system_prompt}\n\n[User]: {message}\n\n[Assistant]:"
+    async with _httpx.AsyncClient(verify=False, timeout=30.0) as client:
+        r = await client.post(
+            "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"inputs": full_prompt, "parameters": {"max_new_tokens": 800, "temperature": 0.7}},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list) and data:
+                return data[0].get("generated_text", "").replace(full_prompt, "").strip()
+        return f"HuggingFace API error: {r.status_code}"
+
+
+def _builtin_response(msg: str, profile, report, content) -> str:
+    """Built-in responses when no AI API key is configured."""
+    lower = msg.lower()
+
+    if not profile:
+        return "Please run an analysis first by uploading your resume, then I can help optimize your profile."
+
+    if any(kw in lower for kw in ["headline", "title"]):
+        current = profile.headline
+        suggested = content.headline.text if content and content.headline else None
+        if suggested:
+            return f"**Current headline:** {current}\n\n**Optimized headline:**\n> {suggested}\n\n**Why it's better:**\n- Uses more of the 220-character limit\n- Includes searchable keywords\n- Has a value proposition\n\nWant a different angle? Tell me what to emphasize."
+        return f"Your headline: \"{current}\"\n\nTo improve, add a value proposition and keywords. Example:\n> {current} | Delivering [result] through [expertise]"
+
+    elif any(kw in lower for kw in ["about", "summary", "bio"]):
+        if content and content.about:
+            return f"**Optimized About section:**\n\n{content.about.text}\n\n---\n**Structure used:**\n- Hook: _{content.about.hook_sentence}_\n- Keywords: {', '.join(content.about.keywords_used)}\n- CTA: _{content.about.call_to_action}_"
+        return "Your about section needs a narrative hook in the first line and a call-to-action at the end. Tell me your target audience and I'll draft one."
+
+    elif any(kw in lower for kw in ["post", "content", "publish", "write"]):
+        if content and content.post_ideas:
+            ideas = "\n".join(f"{i+1}. **{p.topic}** ({p.format})\n   {p.content_outline}" for i, p in enumerate(content.post_ideas[:4]))
+            return f"**Your personalized post ideas:**\n\n{ideas}\n\nWant me to expand any of these into a full draft?"
+        return "Start posting 2-3x/week. Best formats: carousels (highest reach), polls (engagement), text posts (thought leadership)."
+
+    elif any(kw in lower for kw in ["score", "rating", "analysis", "how am i"]):
+        if report:
+            lines = "\n".join(f"- **{s.section_name.title()}**: {s.overall_score}/100 {'🟢' if s.overall_score >= 70 else '🟡' if s.overall_score >= 50 else '🔴'}" for s in report.sections)
+            return f"**Your profile scores:**\n\n{lines}\n\n**Overall: {report.overall_score}/100**\n\nFocus on the red sections first — they have the most improvement potential."
+        return "Run analysis first to see scores."
+
+    elif any(kw in lower for kw in ["experience", "bullet", "job", "work"]):
+        if content and content.experience:
+            exp = content.experience[0]
+            bullets = "\n".join(f"• {b}" for b in exp.bullets[:4])
+            return f"**Optimized bullets for {exp.role_title} at {exp.company}:**\n\n{bullets}\n\n**Tips applied:** Action verbs, quantifiable metrics, role-aligned keywords."
+        return "For experience bullets: Start with action verbs (Led, Built, Drove), include metrics (%, $, time), align with your target role."
+
+    elif any(kw in lower for kw in ["skill", "endorse"]):
+        skills = ", ".join(s.get("name", "") for s in profile.skills[:8])
+        return f"**Your skills:** {skills}\n\n**Action items:**\n1. Pin your top 3 role-relevant skills\n2. Ask 5 colleagues to endorse them this week\n3. Remove skills not related to your target role\n\nWhich role are you targeting?"
+
+    elif any(kw in lower for kw in ["banner", "photo", "picture"]):
+        return "**Profile visuals checklist:**\n\n📸 **Photo:** Professional headshot, 400x400px min, face fills 60% of frame\n\n🖼️ **Banner (1584×396px):** Use Canva → search 'LinkedIn banner' → add:\n- Your name + title\n- 2-3 key skills or certs\n- Professional color scheme\n\nThese alone can increase profile views 20-30%."
+
+    elif any(kw in lower for kw in ["recommend", "suggestion", "fix", "improve"]):
+        if report:
+            recs = []
+            for insight in report.insights:
+                for rec in insight.recommendations[:2]:
+                    recs.append(f"{'🔴' if rec.priority.value == 'high' else '🟡' if rec.priority.value == 'medium' else '🟢'} **{rec.priority.value.upper()}:** {rec.modification}")
+            return "**Top recommendations:**\n\n" + "\n\n".join(recs[:8])
+        return "Run analysis first to get personalized recommendations."
+
+    else:
+        return "I can help with:\n\n• **\"Improve my headline\"** — get an optimized headline\n• **\"Rewrite my about\"** — new about section with hook + CTA\n• **\"Post ideas\"** — content suggestions for this week\n• **\"Fix my experience\"** — better bullets with metrics\n• **\"My scores\"** — see section-by-section breakdown\n• **\"Banner tips\"** — visual branding suggestions\n\nWhat would you like to work on?"
 
 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": "1.0.0"}
+
+
+# ─── Settings / API Key Storage ──────────────────────────────────────────────
+
+class SettingsRequest(BaseModel):
+    provider: str  # openai, anthropic, huggingface
+    api_key: str
+    linkedin_cookie: Optional[str] = None  # li_at cookie for session-based access
+
+_settings = {"provider": "builtin", "api_key": "", "linkedin_cookie": ""}
+
+@app.post("/api/settings")
+async def save_settings(req: SettingsRequest):
+    """Save user's AI provider settings and LinkedIn session."""
+    global _settings
+    _settings["provider"] = req.provider
+    _settings["api_key"] = req.api_key
+    if req.linkedin_cookie:
+        _settings["linkedin_cookie"] = req.linkedin_cookie
+    return {"status": "saved", "provider": req.provider}
+
+@app.get("/api/settings")
+async def get_settings():
+    """Get current settings (masked key)."""
+    key = _settings["api_key"]
+    masked = key[:8] + "..." if len(key) > 8 else "not set"
+    return {
+        "provider": _settings["provider"],
+        "api_key_masked": masked,
+        "has_linkedin_cookie": bool(_settings.get("linkedin_cookie")),
+    }
+
+
+# ─── LinkedIn Session-Based Scraping ─────────────────────────────────────────
+
+@app.post("/api/scrape-linkedin")
+async def scrape_linkedin(linkedin_url: str = Form(""), cookie: str = Form("")):
+    """Scrape LinkedIn profile using session cookie (li_at).
+
+    Users can provide their LinkedIn li_at cookie from their browser
+    to enable authenticated profile scraping without OAuth app setup.
+    """
+    import httpx as _httpx
+
+    url = linkedin_url.strip()
+    session_cookie = cookie.strip() or _settings.get("linkedin_cookie", "")
+
+    if not url:
+        return {"success": False, "error": "No LinkedIn URL provided"}
+
+    if not session_cookie:
+        return {
+            "success": False,
+            "error": "No LinkedIn session cookie. Go to linkedin.com while logged in → F12 → Application → Cookies → copy 'li_at' value → paste in Settings.",
+        }
+
+    # Extract username from URL
+    username = url.rstrip("/").split("/in/")[-1].split("/")[0] if "/in/" in url else ""
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "Cookie": f"li_at={session_cookie}",
+            "Accept": "application/vnd.linkedin.normalized+json+2.1",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+
+        # Use LinkedIn's Voyager API (internal API used by the frontend)
+        api_url = f"https://www.linkedin.com/voyager/api/identity/profiles/{username}/profileView"
+
+        async with _httpx.AsyncClient(verify=False, timeout=15.0) as client:
+            r = await client.get(api_url, headers=headers)
+
+        if r.status_code == 200:
+            data = r.json()
+            # Parse the Voyager response into our format
+            profile_data = _parse_voyager_response(data, username)
+            return {"success": True, "profile": profile_data}
+        elif r.status_code == 401:
+            return {"success": False, "error": "LinkedIn session expired. Please get a fresh li_at cookie."}
+        elif r.status_code == 403:
+            return {"success": False, "error": "Access denied. The li_at cookie may be invalid."}
+        else:
+            return {"success": False, "error": f"LinkedIn returned status {r.status_code}"}
+
+    except Exception as e:
+        return {"success": False, "error": f"Scraping failed: {str(e)[:200]}"}
+
+
+def _parse_voyager_response(data: dict, username: str) -> dict:
+    """Parse LinkedIn Voyager API response into profile data."""
+    profile = {}
+
+    try:
+        # The response structure varies but typically has 'included' array
+        included = data.get("included", [])
+
+        for item in included:
+            entity_type = item.get("$type", "")
+
+            if "Profile" in entity_type and "firstName" in item:
+                profile["headline"] = item.get("headline", "")
+                profile["about"] = item.get("summary", "")
+                profile["firstName"] = item.get("firstName", "")
+                profile["lastName"] = item.get("lastName", "")
+                profile["follower_count"] = item.get("followersCount", 0)
+
+            elif "Position" in entity_type:
+                if "experience" not in profile:
+                    profile["experience"] = []
+                profile["experience"].append({
+                    "title": item.get("title", ""),
+                    "company": item.get("companyName", ""),
+                    "description": item.get("description", ""),
+                })
+
+            elif "Skill" in entity_type:
+                if "skills" not in profile:
+                    profile["skills"] = []
+                name = item.get("name", "")
+                if name:
+                    profile["skills"].append({"name": name, "endorsements": 0})
+
+    except Exception:
+        pass
+
+    if not profile.get("headline"):
+        profile["headline"] = f"LinkedIn profile: {username}"
+
+    return profile
 
 
 if __name__ == "__main__":
