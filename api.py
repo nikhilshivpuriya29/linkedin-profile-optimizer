@@ -362,8 +362,8 @@ async def chat(request: ChatRequest):
     global last_profile, last_report, last_content
 
     msg = request.message
-    provider = (request.context or {}).get("provider", "builtin")  # openai, anthropic, huggingface, builtin
-    api_key = (request.context or {}).get("api_key", "")
+    provider = (request.context or {}).get("provider", "huggingface")  # default to free HF model
+    api_key = (request.context or {}).get("api_key", "") or os.environ.get("HF_TOKEN", "")
 
     # Build profile context for the AI
     profile_context = ""
@@ -461,21 +461,27 @@ async def _call_anthropic(api_key: str, system_prompt: str, message: str) -> str
 
 
 async def _call_huggingface(api_key: str, system_prompt: str, message: str) -> str:
-    """Call HuggingFace Inference API for chat responses."""
+    """Call free model via HuggingFace Router (Llama 3.3 70B via Together)."""
     import httpx as _httpx
 
-    full_prompt = f"[System]: {system_prompt}\n\n[User]: {message}\n\n[Assistant]:"
-    async with _httpx.AsyncClient(verify=False, timeout=30.0) as client:
+    async with _httpx.AsyncClient(verify=False, timeout=60.0) as client:
         r = await client.post(
-            "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"inputs": full_prompt, "parameters": {"max_new_tokens": 800, "temperature": 0.7}},
+            "https://router.huggingface.co/together/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message},
+                ],
+                "max_tokens": 1000,
+                "temperature": 0.7,
+            },
         )
         if r.status_code == 200:
             data = r.json()
-            if isinstance(data, list) and data:
-                return data[0].get("generated_text", "").replace(full_prompt, "").strip()
-        return f"HuggingFace API error: {r.status_code}"
+            return data["choices"][0]["message"]["content"]
+        return f"AI API error ({r.status_code}): {r.text[:150]}"
 
 
 async def _call_gemini(api_key: str, system_prompt: str, message: str) -> str:
